@@ -1,0 +1,587 @@
+// Package scraper provides a unified interface for different anime sources
+package scraper
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/util"
+)
+
+// ScraperType represents different scraper types
+type ScraperType int
+
+// Timeout configurations - balanced for multiple sources
+const (
+	// searchTimeout is the maximum time to wait for all scrapers
+	searchTimeout = 12 * time.Second
+	// perScraperTimeout is the timeout for individual scrapers
+	perScraperTimeout = 10 * time.Second
+	// earlyReturnDelay is the time to wait after first results before returning
+	// Reduced from 3s since sources typically respond within 1s
+	earlyReturnDelay = 1500 * time.Millisecond
+	// minResultsForEarlyReturn is the minimum results needed to trigger early return
+	minResultsForEarlyReturn = 5
+)
+
+const (
+	AllAnimeType ScraperType = iota
+	AnimefireType
+	AnimeDriveType
+	FlixHQType // Movies and TV Shows source
+)
+
+// UnifiedScraper provides a common interface for all scrapers
+type UnifiedScraper interface {
+	SearchAnime(query string, options ...interface{}) ([]*models.Anime, error)
+	GetAnimeEpisodes(animeURL string) ([]models.Episode, error)
+	GetStreamURL(episodeURL string, options ...interface{}) (string, map[string]string, error)
+	GetType() ScraperType
+}
+
+// ScraperManager manages multiple scrapers
+type ScraperManager struct {
+	scrapers map[ScraperType]UnifiedScraper
+}
+
+// NewScraperManager creates a new scraper manager
+func NewScraperManager() *ScraperManager {
+	manager := &ScraperManager{
+		scrapers: make(map[ScraperType]UnifiedScraper),
+	}
+
+	// Initialize scrapers
+	manager.scrapers[AllAnimeType] = &AllAnimeAdapter{client: NewAllAnimeClient()}
+	manager.scrapers[AnimefireType] = &AnimefireAdapter{client: NewAnimefireClient()}
+	manager.scrapers[FlixHQType] = &FlixHQAdapter{client: NewFlixHQClient()}
+
+	// AnimeDrive - Currently on standby
+	// Reason: Site is protected by Cloudflare, no bypass solution found yet
+	// TODO: Revisit when Cloudflare protection is removed or bypass method is discovered
+	// manager.scrapers[AnimeDriveType] = &AnimeDriveAdapter{client: NewAnimeDriveClient()}
+
+	return manager
+}
+
+// SearchAnime searches across all available scrapers with enhanced Portuguese messaging
+// Uses optimized goroutines with early return for better performance
+func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([]*models.Anime, error) {
+	timer := util.StartTimer("SearchAnime:Total")
+	defer timer.Stop()
+
+	util.PerfCount("search_requests")
+
+	if scraperType != nil {
+		return sm.searchSpecificScraper(query, *scraperType)
+	}
+
+	return sm.searchAllScrapersConcurrent(query)
+}
+
+// searchSpecificScraper searches using a single specific scraper
+func (sm *ScraperManager) searchSpecificScraper(query string, scraperType ScraperType) ([]*models.Anime, error) {
+	scraper, exists := sm.scrapers[scraperType]
+	if !exists {
+		return nil, fmt.Errorf("scraper type %v not found", scraperType)
+	}
+
+	util.Debug("Searching specific scraper", "scraper", sm.getScraperDisplayName(scraperType))
+
+	results, err := scraper.SearchAnime(query)
+	if err != nil {
+		return nil, fmt.Errorf("busca falhou em %s: %w", sm.getScraperDisplayName(scraperType), err)
+	}
+
+	// Add language tags
+	sm.tagResults(results, scraperType)
+
+	if len(results) > 0 {
+		util.Debug("Search completed", "scraper", sm.getScraperDisplayName(scraperType), "results", len(results))
+	}
+
+	return results, nil
+}
+
+// searchResult holds the result from a single scraper goroutine
+type searchResult struct {
+	scraperType ScraperType
+	results     []*models.Anime
+	err         error
+}
+
+// searchAllScrapersConcurrent searches all scrapers in parallel with early return optimization
+func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.Anime, error) {
+	util.Debug("Starting concurrent search across all sources", "query", query)
+
+	ctx, cancel := context.WithTimeout(context.Background(), searchTimeout)
+	defer cancel()
+
+	// Thread-safe result collection
+	var (
+		allResults   []*models.Anime
+		resultsMutex sync.Mutex
+		searchErrors []string
+		errorsMutex  sync.Mutex
+	)
+
+	// Track completion for early return
+	var (
+		completedCount  int32
+		totalScrapers   = int32(len(sm.scrapers)) // #nosec G115 - scrapers count is always small (<10)
+		firstResultTime time.Time
+		firstResultOnce sync.Once
+	)
+
+	resultChan := make(chan searchResult, len(sm.scrapers))
+	var wg sync.WaitGroup
+
+	// Launch all scrapers concurrently
+	for sType, scraper := range sm.scrapers {
+		wg.Add(1)
+		go func(st ScraperType, s UnifiedScraper) {
+			defer wg.Done()
+			defer atomic.AddInt32(&completedCount, 1)
+
+			result := sm.searchWithTimeout(ctx, st, s, query)
+			resultChan <- result
+		}(sType, scraper)
+	}
+
+	// Close channel when all goroutines complete
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Early return timer - starts when we get first good results
+	var earlyReturnTimer <-chan time.Time
+
+	// Collect results with early return logic
+	for {
+		select {
+		case res, ok := <-resultChan:
+			if !ok {
+				// Channel closed, all scrapers done
+				goto done
+			}
+
+			if res.err != nil {
+				errorsMutex.Lock()
+				sourceName := sm.getScraperDisplayName(res.scraperType)
+				util.Debug("Search error", "source", sourceName, "error", res.err)
+				searchErrors = append(searchErrors, fmt.Sprintf("%s: %v", sourceName, res.err))
+				errorsMutex.Unlock()
+				continue
+			}
+
+			if len(res.results) > 0 {
+				// Tag and add results thread-safely
+				sm.tagResults(res.results, res.scraperType)
+
+				resultsMutex.Lock()
+				allResults = append(allResults, res.results...)
+				currentCount := len(allResults)
+				resultsMutex.Unlock()
+
+				util.Debug("Search results received", "source", sm.getScraperDisplayName(res.scraperType), "count", len(res.results), "total", currentCount)
+
+				// Start early return timer on first results
+				firstResultOnce.Do(func() {
+					firstResultTime = time.Now()
+					earlyReturnTimer = time.After(earlyReturnDelay)
+				})
+			}
+
+		case <-earlyReturnTimer:
+			// Early return: we have results and waited long enough for other sources
+			resultsMutex.Lock()
+			currentCount := len(allResults)
+			resultsMutex.Unlock()
+
+			completed := atomic.LoadInt32(&completedCount)
+			if currentCount >= minResultsForEarlyReturn && completed < totalScrapers {
+				util.Debug("Early return triggered",
+					"results", currentCount,
+					"completed", completed,
+					"total", totalScrapers,
+					"waitTime", time.Since(firstResultTime))
+				goto done
+			}
+
+		case <-ctx.Done():
+			util.Debug("Search timeout reached")
+			goto done
+		}
+	}
+
+done:
+	// Log warnings for failed sources
+	errorsMutex.Lock()
+	if len(searchErrors) > 0 {
+		for _, errMsg := range searchErrors {
+			util.Warn("Search source unavailable", "details", errMsg)
+		}
+	}
+	errorsMutex.Unlock()
+
+	resultsMutex.Lock()
+	finalResults := allResults
+	resultsMutex.Unlock()
+
+	if len(finalResults) == 0 {
+		util.Debug("No anime found", "query", query)
+		errorsMutex.Lock()
+		defer errorsMutex.Unlock()
+		if len(searchErrors) > 0 {
+			return nil, fmt.Errorf("no anime found with name: %s (some sources failed: %s)", query, strings.Join(searchErrors, "; "))
+		}
+		return nil, fmt.Errorf("no anime found with name: %s", query)
+	}
+
+	sm.logSearchSummary(finalResults)
+	return finalResults, nil
+}
+
+// searchWithTimeout executes a single scraper search with timeout
+func (sm *ScraperManager) searchWithTimeout(ctx context.Context, st ScraperType, s UnifiedScraper, query string) searchResult {
+	sourceName := sm.getScraperDisplayName(st)
+	timer := util.StartTimer("Search:" + sourceName)
+	util.Debug("Searching in source", "source", sourceName)
+
+	// Create individual timeout context
+	scraperCtx, scraperCancel := context.WithTimeout(ctx, perScraperTimeout)
+	defer scraperCancel()
+
+	// Channel for search result
+	done := make(chan searchResult, 1)
+
+	go func() {
+		results, err := s.SearchAnime(query)
+		done <- searchResult{
+			scraperType: st,
+			results:     results,
+			err:         err,
+		}
+	}()
+
+	// Wait for result or timeout
+	select {
+	case result := <-done:
+		timer.Stop()
+		if result.err == nil {
+			util.PerfCount("search_success:" + sourceName)
+		} else {
+			util.PerfCount("search_error:" + sourceName)
+		}
+		return result
+	case <-scraperCtx.Done():
+		timer.Stop()
+		util.PerfCount("search_timeout:" + sourceName)
+		util.Debug("Search timeout", "source", sourceName)
+		return searchResult{
+			scraperType: st,
+			results:     nil,
+			err:         fmt.Errorf("search timed out after %v", perScraperTimeout),
+		}
+	}
+}
+
+// tagResults adds language tags and source metadata to results
+func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType ScraperType) {
+	sourceName := sm.getScraperDisplayName(scraperType)
+	languageTag := sm.getLanguageTag(scraperType)
+
+	for _, anime := range results {
+		// Check if the anime name already has any language tag
+		hasLanguageTag := strings.Contains(anime.Name, "[English]") ||
+			strings.Contains(anime.Name, "[Portuguese]") ||
+			strings.Contains(anime.Name, "[Português]")
+
+		if !hasLanguageTag {
+			anime.Name = fmt.Sprintf("%s %s", languageTag, anime.Name)
+		}
+		anime.Source = sourceName
+	}
+}
+
+// logSearchSummary logs a summary of search results by source
+func (sm *ScraperManager) logSearchSummary(results []*models.Anime) {
+	if !util.IsDebug {
+		return
+	}
+
+	counts := make(map[string]int)
+	for _, anime := range results {
+		counts[anime.Source]++
+	}
+
+	util.Debug("Search summary",
+		"animeFire", counts["Animefire.io"],
+		"allAnime", counts["AllAnime"],
+		"animeDrive", counts["AnimeDrive"],
+		"flixHQ", counts["FlixHQ"],
+		"total", len(results))
+}
+
+// GetScraper returns a specific scraper by type
+func (sm *ScraperManager) GetScraper(scraperType ScraperType) (UnifiedScraper, error) {
+	if scraper, exists := sm.scrapers[scraperType]; exists {
+		return scraper, nil
+	}
+	return nil, fmt.Errorf("scraper type %v not found", scraperType)
+}
+
+// getScraperDisplayName returns a Portuguese display name for the scraper type
+func (sm *ScraperManager) getScraperDisplayName(scraperType ScraperType) string {
+	switch scraperType {
+	case AllAnimeType:
+		return "AllAnime"
+	case AnimefireType:
+		return "Animefire.io"
+	case AnimeDriveType:
+		return "AnimeDrive"
+	case FlixHQType:
+		return "FlixHQ"
+	default:
+		return "Desconhecido"
+	}
+}
+
+// getLanguageTag returns a language tag for the source
+func (sm *ScraperManager) getLanguageTag(scraperType ScraperType) string {
+	switch scraperType {
+	case AllAnimeType:
+		return "[English]"
+	case AnimefireType:
+		return "[Portuguese]"
+	case AnimeDriveType:
+		return "[Portuguese]"
+	case FlixHQType:
+		return "[Movies/TV]"
+	default:
+		return "[Unknown]"
+	}
+}
+
+// AllAnimeAdapter adapts AllAnimeClient to UnifiedScraper interface
+type AllAnimeAdapter struct {
+	client *AllAnimeClient
+}
+
+func (a *AllAnimeAdapter) SearchAnime(query string, options ...interface{}) ([]*models.Anime, error) {
+	// mode is now hardcoded in the new implementation
+	return a.client.SearchAnime(query)
+}
+
+func (a *AllAnimeAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	// For AllAnime, animeURL is actually the anime ID
+	episodes, err := a.client.GetEpisodesList(animeURL, "sub")
+	if err != nil {
+		return nil, err
+	}
+
+	var episodeModels []models.Episode
+	for i, ep := range episodes {
+		episodeModels = append(episodeModels, models.Episode{
+			Number: ep,
+			Num:    i + 1,
+			URL:    animeURL, // Store the anime ID in URL field
+			Title: models.TitleDetails{
+				Romaji: fmt.Sprintf("Episode %s", ep),
+			},
+		})
+	}
+
+	return episodeModels, nil
+}
+
+func (a *AllAnimeAdapter) GetStreamURL(episodeURL string, options ...interface{}) (string, map[string]string, error) {
+	// For AllAnime, episodeURL contains the anime ID
+	animeID := episodeURL
+
+	// Parse options to get episode number
+	episodeNo := "1"
+	if len(options) > 0 {
+		if ep, ok := options[0].(string); ok {
+			episodeNo = ep
+		}
+	}
+
+	quality := "best"
+	if len(options) > 1 {
+		if q, ok := options[1].(string); ok {
+			quality = q
+		}
+	}
+
+	mode := "sub"
+	if len(options) > 2 {
+		if m, ok := options[2].(string); ok {
+			mode = m
+		}
+	}
+
+	return a.client.GetEpisodeURL(animeID, episodeNo, mode, quality)
+}
+
+func (a *AllAnimeAdapter) GetType() ScraperType {
+	return AllAnimeType
+}
+
+// AnimefireAdapter adapts AnimefireClient to UnifiedScraper interface
+type AnimefireAdapter struct {
+	client *AnimefireClient
+}
+
+func (a *AnimefireAdapter) SearchAnime(query string, options ...interface{}) ([]*models.Anime, error) {
+	return a.client.SearchAnime(query)
+}
+
+func (a *AnimefireAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	return a.client.GetAnimeEpisodes(animeURL)
+}
+
+func (a *AnimefireAdapter) GetStreamURL(episodeURL string, options ...interface{}) (string, map[string]string, error) {
+	url, err := a.client.GetEpisodeStreamURL(episodeURL)
+	metadata := make(map[string]string)
+	metadata["source"] = "animefire"
+	return url, metadata, err
+}
+
+func (a *AnimefireAdapter) GetType() ScraperType {
+	return AnimefireType
+}
+
+// AnimeDriveAdapter adapts AnimeDriveClient to UnifiedScraper interface
+type AnimeDriveAdapter struct {
+	client *AnimeDriveClient
+}
+
+func (a *AnimeDriveAdapter) SearchAnime(query string, options ...interface{}) ([]*models.Anime, error) {
+	return a.client.SearchAnime(query)
+}
+
+func (a *AnimeDriveAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	return a.client.GetAnimeEpisodes(animeURL)
+}
+
+func (a *AnimeDriveAdapter) GetStreamURL(episodeURL string, options ...interface{}) (string, map[string]string, error) {
+	// Check if server selection is requested via options
+	selectServer := true // Default to showing server selection
+	for _, opt := range options {
+		if s, ok := opt.(string); ok && s == "auto" {
+			selectServer = false
+			break
+		}
+		if b, ok := opt.(bool); ok {
+			selectServer = b
+		}
+	}
+
+	if selectServer {
+		return a.client.GetStreamURLWithSelection(episodeURL)
+	}
+	return a.client.GetStreamURL(episodeURL)
+}
+
+func (a *AnimeDriveAdapter) GetType() ScraperType {
+	return AnimeDriveType
+}
+
+// FlixHQAdapter adapts FlixHQClient to UnifiedScraper interface for movies and TV shows
+type FlixHQAdapter struct {
+	client *FlixHQClient
+}
+
+func (a *FlixHQAdapter) SearchAnime(query string, options ...interface{}) ([]*models.Anime, error) {
+	media, err := a.client.SearchMedia(query)
+	if err != nil {
+		return nil, err
+	}
+
+	var animes []*models.Anime
+	for _, m := range media {
+		anime := m.ToAnimeModel()
+		// Set the media type
+		if m.Type == MediaTypeMovie {
+			anime.MediaType = models.MediaTypeMovie
+		} else {
+			anime.MediaType = models.MediaTypeTV
+		}
+		anime.Year = m.Year
+		animes = append(animes, anime)
+	}
+
+	return animes, nil
+}
+
+func (a *FlixHQAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	// For FlixHQ, animeURL contains the media ID
+	// This needs to be called differently for movies vs TV shows
+	// For movies, return a single "episode"
+	// For TV shows, we need to get seasons first
+
+	// This is a simplified implementation - in practice, you'd need to know if it's a movie or TV show
+	return nil, fmt.Errorf("for FlixHQ, use GetSeasons and GetEpisodes directly on the client")
+}
+
+func (a *FlixHQAdapter) GetStreamURL(episodeURL string, options ...interface{}) (string, map[string]string, error) {
+	// Parse options
+	provider := "Vidcloud"
+	quality := "1080"
+	subsLanguage := "english"
+
+	for i, opt := range options {
+		if s, ok := opt.(string); ok {
+			switch i {
+			case 0:
+				provider = s
+			case 1:
+				quality = s
+			case 2:
+				subsLanguage = s
+			}
+		}
+	}
+
+	// Get embed link directly from episode ID
+	embedLink, err := a.client.GetEmbedLink(episodeURL)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to get embed link: %w", err)
+	}
+
+	streamInfo, err := a.client.ExtractStreamInfo(embedLink, quality, subsLanguage)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to extract stream info: %w", err)
+	}
+
+	metadata := make(map[string]string)
+	metadata["source"] = "flixhq"
+	metadata["provider"] = provider
+	metadata["quality"] = quality
+
+	// Include subtitle URLs in metadata
+	if len(streamInfo.Subtitles) > 0 {
+		var subURLs []string
+		for _, sub := range streamInfo.Subtitles {
+			subURLs = append(subURLs, sub.URL)
+		}
+		metadata["subtitles"] = strings.Join(subURLs, ",")
+	}
+
+	return streamInfo.VideoURL, metadata, nil
+}
+
+func (a *FlixHQAdapter) GetType() ScraperType {
+	return FlixHQType
+}
+
+// GetClient returns the underlying FlixHQ client for direct access
+func (a *FlixHQAdapter) GetClient() *FlixHQClient {
+	return a.client
+}

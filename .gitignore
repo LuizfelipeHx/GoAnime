@@ -1,0 +1,21 @@
+main.exe
+goanime.exe
+main
+.main
+.idea
+.claude/
+
+# Compiled Object files
+
+*.slo
+*.lo
+
+# Compiled Dynamic libraries
+
+*.so
+*.dylib
+*.dll
+result
+
+#Ignore vscode AI rules
+.github/copilot-instructions.md
