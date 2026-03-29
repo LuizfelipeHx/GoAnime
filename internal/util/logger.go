@@ -3,6 +3,7 @@ package util
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/log"
@@ -102,5 +103,60 @@ func Warnf(format string, args ...interface{}) {
 func Errorf(format string, args ...interface{}) {
 	if Logger != nil {
 		Logger.Error(fmt.Sprintf(format, args...))
+	}
+}
+
+// PrintErrorBox exibe um painel de erro estilizado no terminal.
+// Deve ser chamado antes de menus interativos para garantir visibilidade.
+func PrintErrorBox(title, message string) {
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Bold(true)
+
+	msgStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFD7D7"))
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#FF4444")).
+		Padding(0, 2).
+		MarginTop(1).
+		MarginBottom(1)
+
+	content := titleStyle.Render("✖ "+title) + "\n" + msgStyle.Render(message)
+	fmt.Fprintln(os.Stderr, boxStyle.Render(content))
+}
+
+// FriendlyPlaybackError traduz erros técnicos para mensagens amigáveis.
+// Retorna (título, detalhe) para passar ao PrintErrorBox.
+func FriendlyPlaybackError(err error) (string, string) {
+	if err == nil {
+		return "", ""
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "mpv not found"):
+		return "Player não encontrado",
+			"O MPV não foi encontrado no sistema.\nReinstale em: https://mpv.io/installation/"
+	case strings.Contains(msg, "failed to start mpv"):
+		return "Player falhou ao iniciar",
+			"O MPV não conseguiu abrir. Tente reinstalá-lo:\nhttps://mpv.io/installation/"
+	case strings.Contains(msg, "timeout waiting for mpv"):
+		return "Timeout de reprodução",
+			"O player demorou demais para responder.\nA fonte pode estar lenta. Tente outro servidor."
+	case strings.Contains(msg, "no valid video URL"),
+		strings.Contains(msg, "failed to extract video URL"):
+		return "Vídeo não encontrado",
+			"Não foi possível obter o link do episódio.\nA fonte pode estar fora do ar. Tente outro servidor."
+	case strings.Contains(msg, "go-ytdlp download failed"),
+		strings.Contains(msg, "exit code 1"):
+		return "Download falhou",
+			"O yt-dlp encontrou um erro.\nVerifique sua conexão ou tente atualizar o yt-dlp."
+	case strings.Contains(msg, "bad status"):
+		return "Servidor indisponível",
+			"O servidor de vídeo retornou um erro.\nVerifique sua conexão e tente novamente."
+	default:
+		return "Erro de reprodução",
+			"Algo deu errado. Execute com --debug para mais detalhes.\n" + msg
 	}
 }

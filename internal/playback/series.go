@@ -6,6 +6,7 @@ import (
 	"log"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -101,6 +102,9 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 		// Handle other errors
 		if err != nil {
 			log.Printf("Error during episode playback: %v", err)
+			title, detail := util.FriendlyPlaybackError(err)
+			util.PrintErrorBox(title, detail)
+			time.Sleep(500 * time.Millisecond)
 		}
 
 		userInput := GetUserInput()

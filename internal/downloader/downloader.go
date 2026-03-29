@@ -267,10 +267,17 @@ func (d *EpisodeDownloader) downloadMultipleWithProgress(episodeNums []int, epis
 	}
 
 	if len(errors) > 0 {
-		fmt.Printf("Some downloads failed:\n")
-		for _, err := range errors {
-			fmt.Printf("  - %v\n", err)
+		var detail strings.Builder
+		for i, err := range errors {
+			detail.WriteString(fmt.Sprintf("Episódio %d: %s", i+1, err.Error()))
+			if i < len(errors)-1 {
+				detail.WriteString("\n")
+			}
 		}
+		util.PrintErrorBox(
+			fmt.Sprintf("%d download(s) falharam", len(errors)),
+			detail.String(),
+		)
 		return fmt.Errorf("%d download(s) failed", len(errors))
 	}
 

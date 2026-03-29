@@ -96,6 +96,9 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 
 		if err != nil {
 			log.Printf("Error during movie playback: %v", err)
+			title, detail := util.FriendlyPlaybackError(err)
+			util.PrintErrorBox(title, detail)
+			time.Sleep(500 * time.Millisecond)
 		}
 
 		// Ask user what to do next after movie finishes
