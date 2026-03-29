@@ -34,6 +34,11 @@ func HandlePlaybackMode(animeName string) {
 
 	currentAnimeName := animeName
 
+	// Mostrar "Continue Watching" se houver histórico
+	if chosen, ok := ShowContinueWatching(currentAnimeName); ok && chosen != "" {
+		currentAnimeName = chosen
+	}
+
 	for {
 		// Use enhanced search with retry logic
 		searchTimer := util.StartTimer("SearchAnime:WithRetry")
