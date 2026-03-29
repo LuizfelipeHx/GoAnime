@@ -4,11 +4,9 @@ import (
 	"fmt"
 )
 
-// HandleTrackingNotice displays a notice about tracking availability
+// HandleTrackingNotice informa o modo de tracking ativo.
 func HandleTrackingNotice() {
 	if !IsCgoEnabled {
-		fmt.Println("Notice: Anime progress tracking disabled (CGO not available)")
-		fmt.Println("Episode progress and resume features will not be available.")
-		fmt.Println()
+		fmt.Println("Notice: Using JSON-based progress tracking (SQLite not available)")
 	}
 }

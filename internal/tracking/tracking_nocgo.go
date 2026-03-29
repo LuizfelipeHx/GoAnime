@@ -2,32 +2,29 @@
 
 package tracking
 
-import (
-	"fmt"
-)
+// newJsonTracker creates a LocalTracker backed by a JSON file.
+// Used when CGO/SQLite is not available.
+func newJsonTracker(dbPath string) *LocalTracker {
+	trackerMutex.Lock()
+	defer trackerMutex.Unlock()
 
-// NoopTracker is a tracker that does nothing but logs messages if debug is enabled
-// Used when CGO is disabled and SQLite is unavailable
-type NoopTracker struct{}
-
-// NewNoopTracker creates a new NoopTracker that satisfies the LocalTracker interface
-func NewNoopTracker() *LocalTracker {
-	fmt.Println("Notice: Anime progress tracking disabled (CGO support not available)")
-	return nil
-}
-
-// init function for build without CGO
-func init() {
-	// Override NewLocalTracker to return NoopTracker when CGO is disabled
-	originalNewLocalTracker := NewLocalTracker
-	NewLocalTracker = func(dbPath string) *LocalTracker {
-		return NewNoopTracker()
+	// Return cached tracker if the path matches
+	if globalTracker != nil && globalTrackerPath == dbPath {
+		return globalTracker
 	}
 
-	// Enable local_test.go to still use the real implementation during tests
-	// by keeping a reference to the original function
-	_ = originalNewLocalTracker
+	store := newJsonStorage(dbPath)
+	tracker := &LocalTracker{jsonStore: store}
 
-	// Set the global flag that CGO is disabled
+	globalTracker = tracker
+	globalTrackerPath = dbPath
+	return tracker
+}
+
+// init overrides NewLocalTracker to use JSON storage when CGO is disabled.
+func init() {
+	NewLocalTracker = func(dbPath string) *LocalTracker {
+		return newJsonTracker(dbPath)
+	}
 	IsCgoEnabled = false
 }

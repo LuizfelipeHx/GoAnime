@@ -59,11 +59,12 @@ type Anime struct {
 }
 
 type LocalTracker struct {
-	db       *sql.DB
-	upsertPS *sql.Stmt
-	getPS    *sql.Stmt
-	allPS    *sql.Stmt
-	deletePS *sql.Stmt
+	db        *sql.DB
+	upsertPS  *sql.Stmt
+	getPS     *sql.Stmt
+	allPS     *sql.Stmt
+	deletePS  *sql.Stmt
+	jsonStore *jsonStorage // fallback when CGO/SQLite is unavailable
 }
 
 /*
@@ -360,8 +361,17 @@ func prepareStatements(db *sql.DB) (*preparedStatements, error) {
 *────────────────────────────────────────────────────────────────────────────
 */
 func (t *LocalTracker) UpdateProgress(a Anime) error {
-	// Safety check for when tracker is not initialized
-	if t == nil || t.db == nil || t.upsertPS == nil {
+	if t == nil {
+		return ErrTrackerNotInited
+	}
+	// JSON fallback when SQLite is unavailable
+	if t.db == nil {
+		if t.jsonStore == nil {
+			return ErrTrackerNotInited
+		}
+		return t.jsonStore.update(a)
+	}
+	if t.upsertPS == nil {
 		return ErrTrackerNotInited
 	}
 
@@ -401,8 +411,17 @@ func (t *LocalTracker) UpdateProgress(a Anime) error {
 // GetAnime retrieves tracking data by allanime_id (works for both movies and anime)
 // The anilistID parameter is kept for backwards compatibility but is ignored
 func (t *LocalTracker) GetAnime(anilistID int, allanimeID string) (*Anime, error) {
-	// Safety check for when tracker is not initialized
-	if t == nil || t.db == nil || t.getPS == nil {
+	if t == nil {
+		return nil, ErrTrackerNotInited
+	}
+	// JSON fallback when SQLite is unavailable
+	if t.db == nil {
+		if t.jsonStore == nil {
+			return nil, ErrTrackerNotInited
+		}
+		return t.jsonStore.get(allanimeID)
+	}
+	if t.getPS == nil {
 		return nil, ErrTrackerNotInited
 	}
 
@@ -432,8 +451,17 @@ func (t *LocalTracker) GetAnime(anilistID int, allanimeID string) (*Anime, error
 }
 
 func (t *LocalTracker) GetAllAnime() ([]Anime, error) {
-	// Safety check for when tracker is not initialized
-	if t == nil || t.db == nil || t.allPS == nil {
+	if t == nil {
+		return nil, ErrTrackerNotInited
+	}
+	// JSON fallback when SQLite is unavailable
+	if t.db == nil {
+		if t.jsonStore == nil {
+			return nil, ErrTrackerNotInited
+		}
+		return t.jsonStore.getAll()
+	}
+	if t.allPS == nil {
 		return nil, ErrTrackerNotInited
 	}
 
@@ -476,6 +504,16 @@ func (t *LocalTracker) GetAllAnime() ([]Anime, error) {
 // DeleteAnime removes tracking data by allanime_id
 // The anilistID parameter is kept for backwards compatibility but is ignored
 func (t *LocalTracker) DeleteAnime(anilistID int, allanimeID string) error {
+	if t == nil {
+		return ErrTrackerNotInited
+	}
+	// JSON fallback when SQLite is unavailable
+	if t.db == nil {
+		if t.jsonStore == nil {
+			return ErrTrackerNotInited
+		}
+		return t.jsonStore.remove(allanimeID)
+	}
 	_, err := t.deletePS.Exec(allanimeID)
 	return err
 }
@@ -486,6 +524,14 @@ func (t *LocalTracker) DeleteAnime(anilistID int, allanimeID string) error {
 *────────────────────────────────────────────────────────────────────────────
 */
 func (t *LocalTracker) Close() error {
+	if t == nil {
+		return nil
+	}
+	// JSON backend has no persistent connection to close
+	if t.db == nil {
+		return nil
+	}
+
 	var finalErr error
 
 	closeStmt := func(stmt *sql.Stmt, name string) {
