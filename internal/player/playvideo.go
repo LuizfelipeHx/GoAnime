@@ -501,13 +501,6 @@ func getTrackerDBPath() string {
 
 // initTracking inicializa o sistema de rastreamento
 func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*tracking.LocalTracker, int) {
-	if !tracking.IsCgoEnabled {
-		if util.IsDebug {
-			util.Debug("Tracking disabled: CGO not available")
-		}
-		return nil, 0
-	}
-
 	dbPath := getTrackerDBPath()
 	if dbPath == "" {
 		return nil, 0
@@ -555,10 +548,6 @@ func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*trac
 // InitTrackerAsync initializes the tracker in the background.
 // Call this early in the application lifecycle to avoid delays later.
 func InitTrackerAsync() {
-	if !tracking.IsCgoEnabled {
-		return
-	}
-
 	go func() {
 		dbPath := getTrackerDBPath()
 		if dbPath != "" {
