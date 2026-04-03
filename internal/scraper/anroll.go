@@ -374,10 +374,25 @@ func (c *AnrollClient) fetchPlayerEmbedURL(referer string, option anrollPlayerOp
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return "", fmt.Errorf("resposta invalida do player ajax: %w", err)
 	}
-	if strings.TrimSpace(payload.EmbedURL) == "" {
+	embedURL := strings.TrimSpace(payload.EmbedURL)
+
+	// Dooplay às vezes retorna HTML de iframe em vez de URL direta
+	if strings.Contains(embedURL, "<iframe") || strings.Contains(embedURL, "<IFRAME") {
+		re := regexp.MustCompile(`(?i)<iframe[^>]+\bsrc=["']([^"']+)["']`)
+		if m := re.FindStringSubmatch(embedURL); len(m) == 2 {
+			embedURL = strings.TrimSpace(m[1])
+		}
+	}
+
+	// Normalizar URLs protocol-relative (//player.com/... → https://player.com/...)
+	if strings.HasPrefix(embedURL, "//") {
+		embedURL = "https:" + embedURL
+	}
+
+	if embedURL == "" {
 		return "", fmt.Errorf("embed_url vazio para %s", option.Label)
 	}
-	return strings.TrimSpace(payload.EmbedURL), nil
+	return embedURL, nil
 }
 
 func (c *AnrollClient) fetchPage(pageURL, referer string) (*goquery.Document, error) {
