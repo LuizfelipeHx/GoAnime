@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/api"
@@ -20,6 +21,7 @@ import (
 )
 
 type animeSearchContext struct {
+	mu             sync.Mutex
 	Query          string
 	CanonicalTitle string
 	Aliases        []string
@@ -81,21 +83,28 @@ func (a *App) searchAnimeResolved(query string, sourceType *scraper.ScraperType)
 	ctx := a.resolveAnimeSearchContext(query)
 	searchTerms := append([]string(nil), ctx.Aliases...)
 	searchTerms = mergeSearchTerms(searchTerms, ctx.RelatedTitles)
-	if len(searchTerms) > 20 {
-		searchTerms = searchTerms[:20]
+	// Limit to 5 terms to avoid sequential multi-minute searches
+	if len(searchTerms) > 5 {
+		searchTerms = searchTerms[:5]
 	}
 
 	seen := make(map[string]bool)
+	var seenMu sync.Mutex
 	results := make([]*models.Anime, 0, maxSearchItems)
 	var searchErrors []string
+	deadline := time.Now().Add(14 * time.Second)
 
 	for _, term := range searchTerms {
+		if time.Now().After(deadline) || len(results) >= maxSearchItems {
+			break
+		}
 		batch, err := a.manager.SearchAnime(term, sourceType)
 		if err != nil {
 			searchErrors = append(searchErrors, err.Error())
 			continue
 		}
 
+		seenMu.Lock()
 		for _, item := range batch {
 			if item == nil {
 				continue
@@ -110,6 +119,7 @@ func (a *App) searchAnimeResolved(query string, sourceType *scraper.ScraperType)
 				break
 			}
 		}
+		seenMu.Unlock()
 
 		if len(results) >= maxSearchItems {
 			break
@@ -134,8 +144,18 @@ func (a *App) resolveAnimeSearchContext(query string) *animeSearchContext {
 		SeasonNumber: extractSeasonNumber(query),
 	}
 
-	a.enrichAnimeSearchContextFromAniList(ctx)
-	a.enrichAnimeSearchContextFromJikan(ctx)
+	// Run AniList and Jikan enrichment in parallel to avoid 8s+8s+6s sequential wait
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		a.enrichAnimeSearchContextFromAniList(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		a.enrichAnimeSearchContextFromJikan(ctx)
+	}()
+	wg.Wait()
 
 	if ctx.CanonicalTitle == "" && len(ctx.Aliases) > 0 {
 		ctx.CanonicalTitle = ctx.Aliases[0]
@@ -154,28 +174,11 @@ func (a *App) enrichAnimeSearchContextFromAniList(ctx *animeSearchContext) {
 		return
 	}
 
-	ctx.AniListID = resp.Data.Media.ID
-	if ctx.MalID == 0 {
-		ctx.MalID = resp.Data.Media.IDMal
-	}
-	if ctx.Year == 0 {
-		if resp.Data.Media.SeasonYear > 0 {
-			ctx.Year = resp.Data.Media.SeasonYear
-		} else {
-			ctx.Year = resp.Data.Media.StartDate.Year
-		}
-	}
-
 	titles := []string{
 		resp.Data.Media.Title.UserPreferred,
 		resp.Data.Media.Title.English,
 		resp.Data.Media.Title.Romaji,
 		resp.Data.Media.Title.Native,
-	}
-	ctx.Aliases = mergeSearchTerms(ctx.Aliases, titles)
-	ctx.Aliases = mergeSearchTerms(ctx.Aliases, resp.Data.Media.Synonyms)
-	if ctx.CanonicalTitle == "" {
-		ctx.CanonicalTitle = firstNonEmpty(titles...)
 	}
 
 	related := make([]string, 0, len(resp.Data.Media.Relations.Nodes)*2)
@@ -194,23 +197,54 @@ func (a *App) enrichAnimeSearchContextFromAniList(ctx *animeSearchContext) {
 			node.Title.Native,
 		)
 	}
+
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	ctx.AniListID = resp.Data.Media.ID
+	if ctx.MalID == 0 {
+		ctx.MalID = resp.Data.Media.IDMal
+	}
+	if ctx.Year == 0 {
+		if resp.Data.Media.SeasonYear > 0 {
+			ctx.Year = resp.Data.Media.SeasonYear
+		} else {
+			ctx.Year = resp.Data.Media.StartDate.Year
+		}
+	}
+	ctx.Aliases = mergeSearchTerms(ctx.Aliases, titles)
+	ctx.Aliases = mergeSearchTerms(ctx.Aliases, resp.Data.Media.Synonyms)
+	if ctx.CanonicalTitle == "" {
+		ctx.CanonicalTitle = firstNonEmpty(titles...)
+	}
 	ctx.RelatedTitles = mergeSearchTerms(ctx.RelatedTitles, related)
 }
 
 func (a *App) enrichAnimeSearchContextFromJikan(ctx *animeSearchContext) {
-	resp := fetchJikanSearchMetadata(a.httpClient, ctx.Query)
+	ctx.mu.Lock()
+	query := ctx.Query
+	ctx.mu.Unlock()
+
+	resp := fetchJikanSearchMetadata(a.httpClient, query)
 	if resp == nil || len(resp.Data) == 0 {
 		return
 	}
 
-	candidate := pickBestJikanCandidate(resp.Data, mergeSearchTerms(ctx.Aliases, []string{ctx.CanonicalTitle}))
+	ctx.mu.Lock()
+	aliases := append([]string(nil), ctx.Aliases...)
+	canonical := ctx.CanonicalTitle
+	ctx.mu.Unlock()
+
+	candidate := pickBestJikanCandidate(resp.Data, mergeSearchTerms(aliases, []string{canonical}))
 	if candidate == nil {
 		return
 	}
 
+	var malID int
+	ctx.mu.Lock()
 	if ctx.MalID == 0 {
 		ctx.MalID = candidate.MalID
 	}
+	malID = ctx.MalID
 	if ctx.Year == 0 {
 		ctx.Year = candidate.Year
 	}
@@ -218,14 +252,17 @@ func (a *App) enrichAnimeSearchContextFromJikan(ctx *animeSearchContext) {
 	if ctx.CanonicalTitle == "" {
 		ctx.CanonicalTitle = firstNonEmpty(candidate.TitleEnglish, candidate.Title, candidate.TitleJapanese)
 	}
+	ctx.mu.Unlock()
 
-	if ctx.MalID > 0 {
-		relations := jikanFetchRelations(a.httpClient, ctx.MalID)
+	if malID > 0 {
+		relations := jikanFetchRelations(a.httpClient, malID)
 		titles := make([]string, 0, len(relations))
 		for _, rel := range relations {
 			titles = append(titles, rel.Name)
 		}
+		ctx.mu.Lock()
 		ctx.RelatedTitles = mergeSearchTerms(ctx.RelatedTitles, titles)
+		ctx.mu.Unlock()
 	}
 }
 
