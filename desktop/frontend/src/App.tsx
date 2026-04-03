@@ -16,6 +16,8 @@ import {
   addFavorite,
   downloadEpisode,
   getCatalog,
+  getCatalogByGenre,
+  getGenres,
   getMovieCatalog,
   getEpisodes,
   getFavorites,
@@ -456,6 +458,11 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([])
   const [related, setRelated] = useState<RelatedAnime[]>([])
   const [relatedLoading, setRelatedLoading] = useState(false)
+  const [genres, setGenres] = useState<string[]>([])
+  const [genreOpen, setGenreOpen] = useState(false)
+  const [selectedGenre, setSelectedGenre] = useState('')
+  const [genreSections, setGenreSections] = useState<CatalogSection[]>([])
+  const [genreLoading, setGenreLoading] = useState(false)
 
   const trimmedQuery = useMemo(() => query.trim(), [query])
   const sourceOptions = useMemo(() => {
@@ -541,6 +548,7 @@ export default function App() {
       .then(setCatalog)
       .catch(() => {})
       .finally(() => setCatalogLoading(false))
+    getGenres().then(setGenres).catch(() => {})
 
     getMovieCatalog()
       .then(items => {
@@ -1009,6 +1017,35 @@ export default function App() {
   const canPlay = activeMedia !== null && episodes.length > 0 && playerState !== 'loading'
   const canDownload = activeMedia !== null && currentEpisode !== null && !isDownloading
 
+  const genreLabels: Record<string, string> = {
+    'Action': 'A\u00e7\u00e3o', 'Adventure': 'Aventura', 'Comedy': 'Com\u00e9dia',
+    'Drama': 'Drama', 'Fantasy': 'Fantasia', 'Horror': 'Horror',
+    'Mystery': 'Mist\u00e9rio', 'Romance': 'Romance', 'Sci-Fi': 'Fic\u00e7\u00e3o Cient\u00edfica',
+    'Slice of Life': 'Slice of Life', 'Sports': 'Esporte', 'Supernatural': 'Sobrenatural',
+    'Thriller': 'Suspense', 'Mecha': 'Mecha', 'Music': 'Musical',
+    'Psychological': 'Psicol\u00f3gico', 'Ecchi': 'Ecchi', 'Shounen': 'Shounen',
+    'Shoujo': 'Shoujo', 'Seinen': 'Seinen', 'Isekai': 'Isekai',
+  }
+
+  function handleGenreSelect(genre: string) {
+    if (genre === selectedGenre) {
+      setSelectedGenre('')
+      setGenreSections([])
+      return
+    }
+    setSelectedGenre(genre)
+    setGenreLoading(true)
+    setView('catalog')
+    setQuery('')
+    getCatalogByGenre(genre)
+      .then(setGenreSections)
+      .catch(() => setGenreSections([]))
+      .finally(() => setGenreLoading(false))
+  }
+
+  const catalogDisplaySections = selectedGenre ? genreSections : catalog
+  const catalogDisplayLoading = selectedGenre ? genreLoading : catalogLoading
+
   return (
     <div className={`app${activeMedia === null ? ' app--no-player' : ''}`}>
       {/* Sidebar */}
@@ -1068,6 +1105,29 @@ export default function App() {
               {progress.length > 0 && <span className="sidebar-count">{progress.length}</span>}
             </button>
           </div>
+
+          {genres.length > 0 && (
+            <>
+              <button className="sidebar-nav-btn" onClick={() => setGenreOpen(!genreOpen)}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                <span>G{'\u00ea'}nero</span>
+                <span className={`sidebar-chevron${genreOpen ? ' open' : ''}`}>{'\u25b8'}</span>
+              </button>
+              {genreOpen && (
+                <div className="sidebar-genre-list">
+                  {genres.map(g => (
+                    <button
+                      key={g}
+                      className={`sidebar-genre-item${selectedGenre === g ? ' active' : ''}`}
+                      onClick={() => handleGenreSelect(g)}
+                    >
+                      {genreLabels[g] ?? g}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
 
           {history.length > 0 && (
             <>
@@ -1366,8 +1426,8 @@ export default function App() {
 
         {view === 'catalog' && trimmedQuery.length < 2 && searchState === 'idle' && (
           <Catalog
-            sections={catalog}
-            loading={catalogLoading}
+            sections={catalogDisplaySections}
+            loading={catalogDisplayLoading}
             onPlay={title => setQuery(title)}
           />
         )}
