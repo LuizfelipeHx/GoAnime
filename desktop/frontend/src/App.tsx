@@ -1009,7 +1009,7 @@ export default function App() {
   const canDownload = activeMedia !== null && currentEpisode !== null && !isDownloading
 
   return (
-    <div className="app">
+    <div className={`app${activeMedia === null ? ' app--no-player' : ''}`}>
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="logo">
@@ -1115,7 +1115,7 @@ export default function App() {
           </div>
         </div>
 
-        <div className="topbar-filters">
+        {(trimmedQuery.length >= 2 || view === 'movies') && <div className="topbar-filters">
           <div className="filter-pills">
             {view === 'movies' ? (
               <>
@@ -1155,7 +1155,7 @@ export default function App() {
               {sourceOptions.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
           </div>
-        </div>
+        </div>}
       </header>
 
       {/* Conteúdo principal */}

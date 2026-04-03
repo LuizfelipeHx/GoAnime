@@ -48,6 +48,17 @@ body {
     var(--bg);
 }
 
+.app--no-player {
+  grid-template-columns: 268px 1fr;
+  grid-template-areas:
+    "sidebar header"
+    "sidebar main";
+}
+
+.app--no-player .player-panel {
+  display: none;
+}
+
 .topbar {
   grid-area: header;
   display: flex;
@@ -968,6 +979,58 @@ body {
 }
 .catalog-row::-webkit-scrollbar { height: 4px; }
 .catalog-row::-webkit-scrollbar-thumb { background: var(--surface-2); border-radius: 4px; }
+
+/* ── Catalog row arrow navigation ───────────────────── */
+.catalog-row-wrap {
+  position: relative;
+}
+
+.catalog-row-arrow {
+  position: absolute;
+  top: 0;
+  bottom: 10px;
+  width: 52px;
+  z-index: 10;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.catalog-section:hover .catalog-row-arrow {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.catalog-row-arrow--prev {
+  left: 0;
+  background: linear-gradient(to right, rgba(10,10,15,0.92) 40%, transparent);
+  border-radius: 12px 0 0 12px;
+}
+
+.catalog-row-arrow--next {
+  right: 0;
+  background: linear-gradient(to left, rgba(10,10,15,0.92) 40%, transparent);
+  border-radius: 0 12px 12px 0;
+}
+
+.catalog-row-arrow svg {
+  color: var(--text);
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,0.8));
+}
+
+.catalog-row-arrow:hover {
+  opacity: 1 !important;
+}
+
+.catalog-row-arrow:hover svg {
+  color: var(--accent-2);
+}
 
 /* ── Cards ──────────────────────────────────────── */
 .catalog-card { flex-shrink: 0; width: 148px; cursor: pointer; }
