@@ -125,21 +125,21 @@ function formatLanguageSummary(item: Pick<MediaResult, 'name' | 'hasPortuguese' 
   const watchEn = watchHasSubtitleSignal(item)
   const groupPt = hasPortugueseSignal(item)
 
-  let label = 'Idioma não identificado'
+  let label = 'Idioma nï¿½o identificado'
   if (item.watchHasDub && item.watchHasSub && watchPt) label = 'PT-BR dublado e legendado'
   else if (item.watchHasDub && watchPt) label = 'PT-BR dublado'
   else if (item.watchHasSub && watchPt) label = 'PT-BR legendado'
-  else if (watchPt && watchEn) label = 'PT-BR e inglês'
-  else if (watchPt) label = 'Português do Brasil'
-  else if (item.watchHasSub || watchEn) label = 'Legendado / inglês'
+  else if (watchPt && watchEn) label = 'PT-BR e inglï¿½s'
+  else if (watchPt) label = 'Portuguï¿½s do Brasil'
+  else if (item.watchHasSub || watchEn) label = 'Legendado / inglï¿½s'
   else {
     const tag = extractLangTag(item.name)
-    if (tag?.variant === 'pt') label = 'Português do Brasil'
-    else if (tag?.variant === 'en') label = 'Legendado / inglês'
+    if (tag?.variant === 'pt') label = 'Portuguï¿½s do Brasil'
+    else if (tag?.variant === 'en') label = 'Legendado / inglï¿½s'
   }
 
   if (!watchPt && groupPt) {
-    return `${label} · PT-BR em outra fonte`
+    return `${label} ï¿½ PT-BR em outra fonte`
   }
   return label
 }
@@ -1013,6 +1013,9 @@ export default function App() {
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="logo">
+          <div className="logo-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+          </div>
           <div className="logo-text">
             <span className="logo-go">Go</span><span className="logo-anime">Anime</span>
           </div>
@@ -1067,7 +1070,7 @@ export default function App() {
 
           {history.length > 0 && (
             <>
-              <p className="sidebar-label" style={{ marginTop: '16px' }}>Recentes</p>
+              <p className="sidebar-label">Recentes</p>
               {history.map(entry => (
                 <button key={entry.name} className="history-item" onClick={() => setQuery(entry.name)} title={entry.name}>
                   <IconClock />
@@ -1083,23 +1086,8 @@ export default function App() {
 
       {/* Topbar */}
       <header className="topbar">
-        <div className="titlebar">
-          <div className="titlebar-brand">GoAnime Desktop</div>
+        <div className="topbar-main">
           <div className="titlebar-drag" />
-          <div className="window-controls">
-            <button className="wc-btn" type="button" aria-label="Minimizar janela" title="Minimizar" onClick={() => WindowMinimise()}>
-              <IconMinimise />
-            </button>
-            <button className="wc-btn" type="button" aria-label="Maximizar janela" title={isMaximised ? 'Restaurar' : 'Maximizar'} onClick={() => void handleToggleMaximise()}>
-              <IconMaximise active={isMaximised} />
-            </button>
-            <button className="wc-btn wc-close" type="button" aria-label="Fechar janela" title="Fechar" onClick={() => Quit()}>
-              <IconClose />
-            </button>
-          </div>
-        </div>
-
-        <div className="toolbar">
           <div className="search-box">
             <IconSearch />
             <input
@@ -1114,7 +1102,20 @@ export default function App() {
               </button>
             )}
           </div>
+          <div className="window-controls">
+            <button className="wc-btn" type="button" aria-label="Minimizar janela" title="Minimizar" onClick={() => WindowMinimise()}>
+              <IconMinimise />
+            </button>
+            <button className="wc-btn" type="button" aria-label="Maximizar janela" title={isMaximised ? 'Restaurar' : 'Maximizar'} onClick={() => void handleToggleMaximise()}>
+              <IconMaximise active={isMaximised} />
+            </button>
+            <button className="wc-btn wc-close" type="button" aria-label="Fechar janela" title="Fechar" onClick={() => Quit()}>
+              <IconClose />
+            </button>
+          </div>
+        </div>
 
+        <div className="topbar-filters">
           <div className="filter-pills">
             {view === 'movies' ? (
               <>
