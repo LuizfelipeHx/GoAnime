@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Hls from 'hls.js'
 import { Catalog } from './Catalog'
 import {
+  BrowserOpenURL,
   EventsOn,
   Quit,
   WindowFullscreen,
@@ -1508,9 +1509,16 @@ export default function App() {
               <p className="player-title">{activeMedia ? cleanTitle(activeMedia.name) : 'Player'}</p>
               <p className={`player-subtitle${playerState === 'error' ? ' player-subtitle-error' : ''}`}>{playerMessage}</p>
               {playerState === 'error' && activeMedia && (
-                <button className="btn-retry" type="button" onClick={() => void startPlayback(episodeIndex)}>
-                  Tentar novamente
-                </button>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                  <button className="btn-retry" type="button" onClick={() => void startPlayback(episodeIndex)}>
+                    Tentar novamente
+                  </button>
+                  {activeMedia.url && activeMedia.url.includes('bakashi') && episodes[episodeIndex]?.url && (
+                    <button className="btn-retry" type="button" style={{ borderColor: 'rgba(108,99,255,0.4)', color: 'var(--accent-2)', background: 'rgba(108,99,255,0.1)' }} onClick={() => BrowserOpenURL(episodes[episodeIndex].url)}>
+                      Abrir no navegador
+                    </button>
+                  )}
+                </div>
               )}
             </div>
 
