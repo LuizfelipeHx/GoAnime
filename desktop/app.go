@@ -44,9 +44,12 @@ type App struct {
 	proxyServer   *http.Server
 	proxyListener net.Listener
 
-	catalogMu     sync.RWMutex
-	catalogCache  []CatalogSection
-	catalogExpiry time.Time
+	catalogMu      sync.RWMutex
+	catalogCache   []CatalogSection
+	catalogExpiry  time.Time
+	genreCacheMu   sync.RWMutex
+	genreCache     map[string][]CatalogSection
+	genreCacheTime map[string]time.Time
 
 	movieCatalogMu     sync.RWMutex
 	movieCatalogCache  []CatalogSection

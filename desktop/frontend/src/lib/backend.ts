@@ -185,6 +185,8 @@ type WailsApp = {
   GetSearchHistory: () => Promise<HistoryEntry[]>
   GetWatchProgress: () => Promise<WatchProgressEntry[]>
   GetCatalog: () => Promise<CatalogSection[]>
+  GetCatalogByGenre: (genre: string) => Promise<CatalogSection[]>
+  GetGenres: () => Promise<string[]>
   GetMovieCatalog: () => Promise<CatalogSection[]>
   GetFavorites: () => Promise<FavoriteEntry[]>
   AddFavorite: (entry: FavoriteEntry) => Promise<void>
@@ -242,6 +244,14 @@ export async function getWatchProgress(): Promise<WatchProgressEntry[]> {
 
 export async function getCatalog(): Promise<CatalogSection[]> {
   return getApp().GetCatalog()
+}
+
+export async function getCatalogByGenre(genre: string): Promise<CatalogSection[]> {
+  return getApp().GetCatalogByGenre(genre)
+}
+
+export async function getGenres(): Promise<string[]> {
+  return getApp().GetGenres()
 }
 
 export async function getMovieCatalog(): Promise<CatalogSection[]> {

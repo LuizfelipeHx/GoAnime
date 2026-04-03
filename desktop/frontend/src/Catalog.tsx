@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { CatalogItem, CatalogSection } from './lib/backend'
+import { getCatalogByGenre, getGenres } from './lib/backend'
 
 const IconFilm = () => (
   <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.28 }}>
@@ -19,6 +20,30 @@ const IconInfo = () => (
     <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
   </svg>
 )
+
+const genreLabels: Record<string, string> = {
+  'Action': 'A\u00e7\u00e3o',
+  'Adventure': 'Aventura',
+  'Comedy': 'Com\u00e9dia',
+  'Drama': 'Drama',
+  'Fantasy': 'Fantasia',
+  'Horror': 'Horror',
+  'Mystery': 'Mist\u00e9rio',
+  'Romance': 'Romance',
+  'Sci-Fi': 'Fic\u00e7\u00e3o Cient\u00edfica',
+  'Slice of Life': 'Slice of Life',
+  'Sports': 'Esporte',
+  'Supernatural': 'Sobrenatural',
+  'Thriller': 'Suspense',
+  'Mecha': 'Mecha',
+  'Music': 'Musical',
+  'Psychological': 'Psicol\u00f3gico',
+  'Ecchi': 'Ecchi',
+  'Shounen': 'Shounen',
+  'Shoujo': 'Shoujo',
+  'Seinen': 'Seinen',
+  'Isekai': 'Isekai',
+}
 
 const statusLabels: Record<string, string> = {
   FINISHED: 'Finalizado',
@@ -253,37 +278,104 @@ function CatalogRow({ section, onPlay }: { section: CatalogSection; onPlay: (t: 
 }
 
 export function Catalog({ sections, loading, onPlay }: Props) {
-  if (loading) {
+  const [genres, setGenres] = useState<string[]>([])
+  const [selectedGenre, setSelectedGenre] = useState<string>('')
+  const [genreSections, setGenreSections] = useState<CatalogSection[]>([])
+  const [genreLoading, setGenreLoading] = useState(false)
+
+  useEffect(() => {
+    getGenres().then(setGenres).catch(() => {})
+  }, [])
+
+  const handleGenreSelect = useCallback((genre: string) => {
+    if (genre === selectedGenre) {
+      setSelectedGenre('')
+      setGenreSections([])
+      return
+    }
+    setSelectedGenre(genre)
+    setGenreLoading(true)
+    getCatalogByGenre(genre)
+      .then(setGenreSections)
+      .catch(() => setGenreSections([]))
+      .finally(() => setGenreLoading(false))
+  }, [selectedGenre])
+
+  const isFiltered = selectedGenre !== ''
+  const displaySections = isFiltered ? genreSections : sections
+  const isLoading = isFiltered ? genreLoading : loading
+
+  if (!isFiltered && loading) {
     return (
       <div className="catalog">
         <HeroSkeleton />
+        {genres.length > 0 && (
+          <div className="genre-bar">
+            {genres.map(g => (
+              <button key={g} className="genre-pill" onClick={() => handleGenreSelect(g)}>
+                {genreLabels[g] ?? g}
+              </button>
+            ))}
+          </div>
+        )}
         <RowSkeleton />
         <RowSkeleton />
       </div>
     )
   }
 
-  if (sections.length === 0) return null
+  if (!isFiltered && sections.length === 0) return null
 
   // Collect up to 5 items with banner images across all sections for the rotating hero
   const heroItems: CatalogItem[] = []
-  for (const section of sections) {
+  for (const section of displaySections) {
     for (const item of section.items) {
       if (item.bannerImage && heroItems.length < 5) {
         heroItems.push(item)
       }
     }
   }
-  if (heroItems.length === 0 && sections[0]?.items[0]) {
-    heroItems.push(sections[0].items[0])
+  if (heroItems.length === 0 && displaySections[0]?.items[0]) {
+    heroItems.push(displaySections[0].items[0])
   }
 
   return (
     <div className="catalog">
-      {heroItems.length > 0 && <Hero items={heroItems} onPlay={onPlay} />}
-      {sections.map(section => (
-        <CatalogRow key={section.label} section={section} onPlay={onPlay} />
-      ))}
+      {heroItems.length > 0 && !isFiltered && <Hero items={heroItems} onPlay={onPlay} />}
+
+      {genres.length > 0 && (
+        <div className="genre-bar">
+          {isFiltered && (
+            <button className="genre-pill active" onClick={() => handleGenreSelect(selectedGenre)} style={{ background: 'var(--surface-2)', borderColor: 'var(--text-soft)', color: 'var(--text)' }}>
+              ✕ Todos
+            </button>
+          )}
+          {genres.map(g => (
+            <button
+              key={g}
+              className={`genre-pill${selectedGenre === g ? ' active' : ''}`}
+              onClick={() => handleGenreSelect(g)}
+            >
+              {genreLabels[g] ?? g}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {isLoading ? (
+        <>
+          <RowSkeleton />
+          <RowSkeleton />
+        </>
+      ) : displaySections.length === 0 ? (
+        <div style={{ textAlign: 'center', color: 'var(--text-soft)', padding: '60px 0' }}>
+          Nenhum anime encontrado para "{genreLabels[selectedGenre] ?? selectedGenre}"
+        </div>
+      ) : (
+        displaySections.map(section => (
+          <CatalogRow key={section.label} section={section} onPlay={onPlay} />
+        ))
+      )}
     </div>
   )
 }

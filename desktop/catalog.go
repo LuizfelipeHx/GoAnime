@@ -39,6 +39,24 @@ query ($page: Int, $perPage: Int, $sort: [MediaSort], $season: MediaSeason, $sea
 }
 `
 
+const genreCatalogQuery = `
+query ($page: Int, $perPage: Int, $sort: [MediaSort], $genre: String) {
+  Page(page: $page, perPage: $perPage) {
+    media(sort: $sort, type: ANIME, isAdult: false, genre: $genre) {
+      id
+      title { romaji english }
+      coverImage { large }
+      bannerImage
+      averageScore
+      genres
+      episodes
+      description(asHtml: false)
+      status
+    }
+  }
+}
+`
+
 type anilistPageResp struct {
 	Data struct {
 		Page struct {
@@ -426,4 +444,163 @@ func bakashiCatalogItem(sectionIdx int, itemIdx int, media *models.Anime) Catalo
 		Description: description,
 		Status:      status,
 	}
+}
+
+// GetGenres returns the list of available anime genres for filtering.
+func (a *App) GetGenres() []string {
+	return []string{
+		"Action", "Adventure", "Comedy", "Drama", "Fantasy",
+		"Horror", "Mystery", "Romance", "Sci-Fi", "Slice of Life",
+		"Sports", "Supernatural", "Thriller", "Mecha", "Music",
+		"Psychological", "Ecchi", "Shounen", "Shoujo", "Seinen", "Isekai",
+	}
+}
+
+// GetCatalogByGenre returns catalog sections filtered by a specific genre.
+// Results are cached for 10 minutes per genre.
+func (a *App) GetCatalogByGenre(genre string) []CatalogSection {
+	genre = strings.TrimSpace(genre)
+	if genre == "" {
+		return a.GetCatalog()
+	}
+
+	a.genreCacheMu.RLock()
+	if cached, ok := a.genreCache[genre]; ok {
+		if exp, ok2 := a.genreCacheTime[genre]; ok2 && time.Now().Before(exp) {
+			a.genreCacheMu.RUnlock()
+			return cached
+		}
+	}
+	a.genreCacheMu.RUnlock()
+
+	type genreTask struct {
+		idx   int
+		label string
+		sort  []string
+	}
+
+	tasks := []genreTask{
+		{0, "Em alta de " + genre, []string{"TRENDING_DESC"}},
+		{1, "Populares de " + genre, []string{"POPULARITY_DESC"}},
+		{2, "Melhores avaliados de " + genre, []string{"SCORE_DESC"}},
+	}
+
+	type indexedResult struct {
+		idx   int
+		label string
+		items []CatalogItem
+	}
+
+	ch := make(chan indexedResult, len(tasks))
+	var wg sync.WaitGroup
+
+	for _, t := range tasks {
+		wg.Add(1)
+		go func(t genreTask) {
+			defer wg.Done()
+			items, err := a.fetchCatalogItemsByGenre(t.sort, genre, 25)
+			if err != nil || len(items) == 0 {
+				return
+			}
+			ch <- indexedResult{t.idx, t.label, items}
+		}(t)
+	}
+
+	go func() { wg.Wait(); close(ch) }()
+
+	ordered := make([]CatalogSection, len(tasks))
+	for r := range ch {
+		ordered[r.idx] = CatalogSection{Label: r.label, Items: r.items}
+	}
+
+	var sections []CatalogSection
+	for _, s := range ordered {
+		if len(s.Items) > 0 {
+			sections = append(sections, s)
+		}
+	}
+
+	a.genreCacheMu.Lock()
+	if a.genreCache == nil {
+		a.genreCache = make(map[string][]CatalogSection)
+		a.genreCacheTime = make(map[string]time.Time)
+	}
+	a.genreCache[genre] = sections
+	a.genreCacheTime[genre] = time.Now().Add(10 * time.Minute)
+	a.genreCacheMu.Unlock()
+
+	return sections
+}
+
+func (a *App) fetchCatalogItemsByGenre(sortBy []string, genre string, perPage int) ([]CatalogItem, error) {
+	vars := map[string]interface{}{
+		"page":    1,
+		"perPage": perPage,
+		"sort":    sortBy,
+		"genre":   genre,
+	}
+
+	body, err := json.Marshal(map[string]interface{}{
+		"query":     genreCatalogQuery,
+		"variables": vars,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, anilistEndpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; GoAnime/1.0)")
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("anilist genre request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("anilist returned status %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var page anilistPageResp
+	if err := json.Unmarshal(data, &page); err != nil {
+		return nil, err
+	}
+
+	items := make([]CatalogItem, 0, len(page.Data.Page.Media))
+	for _, m := range page.Data.Page.Media {
+		title := m.Title.English
+		if title == "" {
+			title = m.Title.Romaji
+		}
+		desc := htmlTagsRe.ReplaceAllString(m.Description, "")
+		runes := []rune(desc)
+		if len(runes) > 220 {
+			desc = string(runes[:220]) + "..."
+		}
+		items = append(items, CatalogItem{
+			ID:          m.ID,
+			Title:       title,
+			CoverImage:  m.CoverImage.Large,
+			BannerImage: m.BannerImage,
+			Score:       float64(m.AverageScore) / 10.0,
+			Genres:      m.Genres,
+			Episodes:    m.Episodes,
+			Description: desc,
+			Status:      m.Status,
+		})
+	}
+	return items, nil
 }

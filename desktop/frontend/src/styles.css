@@ -825,6 +825,41 @@ body {
 /* â”€â”€ Catalog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .catalog { padding-bottom: 24px; }
 
+/* -- Genre filter bar ---------------------------------------- */
+.genre-bar {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  margin-bottom: 24px;
+  scrollbar-width: none;
+}
+.genre-bar::-webkit-scrollbar { display: none; }
+
+.genre-pill {
+  flex-shrink: 0;
+  padding: 7px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-soft);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.genre-pill:hover {
+  color: var(--text);
+  border-color: rgba(255,255,255,0.18);
+  background: var(--surface-2);
+}
+.genre-pill.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 /* ── Hero ───────────────────────────────────────── */
 .catalog-hero {
   position: relative;
