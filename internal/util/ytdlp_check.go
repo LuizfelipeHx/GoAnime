@@ -77,5 +77,18 @@ func FindYtDlpBinary() string {
 			return p
 		}
 	}
+
+	// Fallback: look for versioned binaries (e.g. yt-dlp-2026.03.17.exe)
+	for _, p := range candidates {
+		dir := filepath.Dir(p)
+		matches, _ := filepath.Glob(filepath.Join(dir, "yt-dlp-*.exe"))
+		if len(matches) == 0 {
+			matches, _ = filepath.Glob(filepath.Join(dir, "yt-dlp-*"))
+		}
+		if len(matches) > 0 {
+			// Return the last match (most recent version alphabetically)
+			return matches[len(matches)-1]
+		}
+	}
 	return ""
 }

@@ -170,7 +170,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 // Enhanced episode fetching that works with different sources
 func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 	// Check if this is a FlixHQ movie/TV show
-	if anime.Source == "FlixHQ" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
+	if anime.Source == "FlixHQ" || strings.Contains(strings.ToLower(anime.URL), "flixhq") {
 		return GetFlixHQEpisodes(anime)
 	}
 
@@ -186,6 +186,8 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 		sourceName = "AnimeDrive"
 	} else if strings.Contains(strings.ToLower(anime.Source), "anroll") {
 		sourceName = "Anroll"
+	} else if strings.Contains(strings.ToLower(anime.Source), "bakashi") {
+		sourceName = "Bakashi"
 	} else if strings.Contains(anime.Name, "[English]") {
 		// Priority 2: Check language tags (AllAnime = English)
 		sourceName = "AllAnime"
@@ -215,6 +217,9 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 	} else if strings.Contains(anime.URL, "anroll.tv") {
 		sourceName = "Anroll"
 		anime.Source = "Anroll"
+	} else if strings.Contains(anime.URL, "bakashi.to") {
+		sourceName = "Bakashi"
+		anime.Source = "Bakashi"
 	} else {
 		// Default to AllAnime for unknown sources
 		sourceName = "AllAnime (default)"
@@ -261,6 +266,13 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 			return nil, fmt.Errorf("failed to get Anroll scraper: %w", scErr)
 		}
 		episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
+	} else if sourceName == "Bakashi" {
+		scraperManager := scraper.NewScraperManager()
+		scraperInstance, scErr := scraperManager.GetScraper(scraper.BakashiType)
+		if scErr != nil {
+			return nil, fmt.Errorf("failed to get Bakashi scraper: %w", scErr)
+		}
+		episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
 	} else {
 		// For AnimeFire and others, use the original API function
 		episodes, err = GetAnimeEpisodes(anime.URL)
@@ -293,7 +305,7 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 // Enhanced episode URL fetching with improved source detection
 func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality string) (string, error) {
 	// Check if this is FlixHQ content
-	if anime.Source == "FlixHQ" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
+	if anime.Source == "FlixHQ" || strings.Contains(strings.ToLower(anime.URL), "flixhq") {
 		streamURL, _, err := GetFlixHQStreamURL(anime, episode, quality)
 		return streamURL, err
 	}
@@ -317,6 +329,9 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 	} else if strings.Contains(strings.ToLower(anime.Source), "anroll") {
 		scraperType = scraper.AnrollType
 		sourceName = "Anroll"
+	} else if strings.Contains(strings.ToLower(anime.Source), "bakashi") {
+		scraperType = scraper.BakashiType
+		sourceName = "Bakashi"
 	} else if strings.Contains(anime.Name, "[English]") {
 		// Priority 2: Check language tags (AllAnime = English)
 		scraperType = scraper.AllAnimeType
@@ -346,6 +361,9 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 	} else if strings.Contains(anime.URL, "anroll.tv") {
 		scraperType = scraper.AnrollType
 		sourceName = "Anroll"
+	} else if strings.Contains(anime.URL, "bakashi.to") {
+		scraperType = scraper.BakashiType
+		sourceName = "Bakashi"
 	} else if strings.Contains(anime.URL, "allanime") {
 		// Priority 6: AllAnime full URLs
 		scraperType = scraper.AllAnimeType

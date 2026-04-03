@@ -83,16 +83,16 @@ func (a *App) searchAnimeResolved(query string, sourceType *scraper.ScraperType)
 	ctx := a.resolveAnimeSearchContext(query)
 	searchTerms := append([]string(nil), ctx.Aliases...)
 	searchTerms = mergeSearchTerms(searchTerms, ctx.RelatedTitles)
-	// Limit to 5 terms to avoid sequential multi-minute searches
-	if len(searchTerms) > 5 {
-		searchTerms = searchTerms[:5]
+	// Limit search terms to avoid excessively long sequential searches
+	if len(searchTerms) > 10 {
+		searchTerms = searchTerms[:10]
 	}
 
 	seen := make(map[string]bool)
 	var seenMu sync.Mutex
 	results := make([]*models.Anime, 0, maxSearchItems)
 	var searchErrors []string
-	deadline := time.Now().Add(14 * time.Second)
+	deadline := time.Now().Add(18 * time.Second)
 
 	for _, term := range searchTerms {
 		if time.Now().After(deadline) || len(results) >= maxSearchItems {
@@ -124,6 +124,18 @@ func (a *App) searchAnimeResolved(query string, sourceType *scraper.ScraperType)
 		if len(results) >= maxSearchItems {
 			break
 		}
+	}
+
+	// If no specific source was requested, remove FlixHQ results: it is a
+	// movie/TV source and anime-resolved searches should never include it.
+	if sourceType == nil {
+		filtered := results[:0]
+		for _, r := range results {
+			if !strings.EqualFold(r.Source, "flixhq") {
+				filtered = append(filtered, r)
+			}
+		}
+		results = filtered
 	}
 
 	if len(results) == 0 {
@@ -875,19 +887,23 @@ func sourceBasePreference(source string, action string) int {
 	switch action {
 	case "watch":
 		switch source {
-		case "allanime":
-			return 120
+		case "bakashi":
+			return 135
 		case "animefire":
-			return 110
+			return 120
 		case "animesonlinecc":
+			return 105
+		case "allanime":
 			return 95
 		case "anroll":
-			return 55
+			return 70
 		}
 	case "download":
 		switch source {
 		case "allanime":
-			return 140
+			return 130
+		case "bakashi":
+			return 105
 		case "animefire":
 			return 90
 		case "animesonlinecc":
@@ -898,7 +914,9 @@ func sourceBasePreference(source string, action string) int {
 	case "dub":
 		switch source {
 		case "animefire":
-			return 140
+			return 135
+		case "bakashi":
+			return 130
 		case "animesonlinecc":
 			return 120
 		case "anroll":
@@ -908,19 +926,20 @@ func sourceBasePreference(source string, action string) int {
 		}
 	case "sub":
 		switch source {
+		case "bakashi":
+			return 145
 		case "allanime":
-			return 140
+			return 110
 		case "animefire":
 			return 100
-		case "animesonlinecc":
-			return 85
 		case "anroll":
 			return 90
+		case "animesonlinecc":
+			return 85
 		}
 	}
 	return 50
 }
-
 func mediaAlternativeFromAnime(item *models.Anime) MediaAlternative {
 	if item == nil {
 		return MediaAlternative{}
@@ -953,7 +972,7 @@ func detectAlternativeLanguage(item MediaAlternative) (bool, bool, bool, bool) {
 	name := strings.ToLower(strings.TrimSpace(item.Name))
 	isDub := strings.Contains(name, "dublado") || strings.Contains(name, "[dub]") || strings.Contains(name, "[portuguese]") || strings.Contains(name, "[portugues]")
 	isSub := strings.Contains(name, "legendado") || strings.Contains(name, "[sub]") || strings.Contains(name, "[english]")
-	isPortuguese := isDub || strings.Contains(name, "portuguese") || strings.Contains(name, "portugues") || source == "animefire" || source == "animesonlinecc" || source == "anroll"
+	isPortuguese := isDub || strings.Contains(name, "portuguese") || strings.Contains(name, "portugues") || source == "animefire" || source == "animesonlinecc" || source == "anroll" || source == "bakashi"
 	isEnglish := strings.Contains(name, "english") || source == "allanime" || (!isPortuguese && !isDub)
 	if isPortuguese && !isDub && !isSub {
 		isSub = true

@@ -934,8 +934,11 @@ func parseSource(sourceArg string) (*scraper.ScraperType, string) {
 	case "anroll":
 		t := scraper.AnrollType
 		return &t, ""
+	case "bakashi":
+		t := scraper.BakashiType
+		return &t, ""
 	default:
-		return nil, "invalid source; use: all, allanime, animefire, flixhq, animesonlinecc, anroll"
+		return nil, "invalid source; use: all, allanime, animefire, flixhq, animesonlinecc, anroll, bakashi"
 	}
 }
 
@@ -978,6 +981,8 @@ func normalizeSource(source string) string {
 		return "Animefire.io"
 	case strings.Contains(lower, "flixhq"):
 		return "FlixHQ"
+	case strings.Contains(lower, "bakashi"):
+		return "Bakashi"
 	case strings.Contains(lower, "animedrive"):
 		return "AnimeDrive"
 	case strings.Contains(lower, "animesonlinecc"):

@@ -37,7 +37,7 @@ import {
   type WatchProgressEntry,
 } from './lib/backend'
 
-type SourceFilter = 'all' | 'allanime' | 'animefire' | 'flixhq' | 'animesonlinecc' | 'anroll'
+type SourceFilter = 'all' | 'allanime' | 'animefire' | 'flixhq' | 'animesonlinecc' | 'anroll' | 'bakashi'
 type TypeFilter = 'all' | 'anime' | 'movie' | 'tv'
 type LangFilter = 'all' | 'pt' | 'en'
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
@@ -48,19 +48,20 @@ type Toast = { id: number; message: string; type: ToastType }
 
 const sources: { label: string; value: SourceFilter }[] = [
   { label: 'Todas as fontes', value: 'all' },
-  { label: 'AllAnime', value: 'allanime' },
+  { label: 'Bakashi', value: 'bakashi' },
   { label: 'AnimeFire', value: 'animefire' },
-  { label: 'FlixHQ', value: 'flixhq' },
   { label: 'AnimesOnlineCC', value: 'animesonlinecc' },
   { label: 'Anroll', value: 'anroll' },
+  { label: 'AllAnime', value: 'allanime' },
+  { label: 'FlixHQ', value: 'flixhq' },
 ]
 
 const movieSourcesPrimary: { label: string; value: SourceFilter }[] = [
   { label: 'Fontes principais', value: 'all' },
+  { label: 'Bakashi', value: 'bakashi' },
   { label: 'AnimeFire', value: 'animefire' },
   { label: 'AnimesOnlineCC', value: 'animesonlinecc' },
 ]
-
 const movieSourcesExtra: { label: string; value: SourceFilter }[] = [
   { label: 'Todas as fontes de filme', value: 'all' },
   { label: 'FlixHQ (extra / inglês)', value: 'flixhq' },
@@ -125,21 +126,21 @@ function formatLanguageSummary(item: Pick<MediaResult, 'name' | 'hasPortuguese' 
   const watchEn = watchHasSubtitleSignal(item)
   const groupPt = hasPortugueseSignal(item)
 
-  let label = 'Idioma n�o identificado'
+  let label = 'Idioma n\u00e3o identificado'
   if (item.watchHasDub && item.watchHasSub && watchPt) label = 'PT-BR dublado e legendado'
   else if (item.watchHasDub && watchPt) label = 'PT-BR dublado'
   else if (item.watchHasSub && watchPt) label = 'PT-BR legendado'
-  else if (watchPt && watchEn) label = 'PT-BR e ingl�s'
-  else if (watchPt) label = 'Portugu�s do Brasil'
-  else if (item.watchHasSub || watchEn) label = 'Legendado / ingl�s'
+  else if (watchPt && watchEn) label = 'PT-BR e ingl\u00eas'
+  else if (watchPt) label = 'Portugu\u00eas do Brasil'
+  else if (item.watchHasSub || watchEn) label = 'Legendado / ingl\u00eas'
   else {
     const tag = extractLangTag(item.name)
-    if (tag?.variant === 'pt') label = 'Portugu�s do Brasil'
-    else if (tag?.variant === 'en') label = 'Legendado / ingl�s'
+    if (tag?.variant === 'pt') label = 'Portugu\u00eas do Brasil'
+    else if (tag?.variant === 'en') label = 'Legendado / ingl\u00eas'
   }
 
   if (!watchPt && groupPt) {
-    return `${label} � PT-BR em outra fonte`
+    return `${label} \u2022 PT-BR em outra fonte`
   }
   return label
 }
@@ -197,7 +198,6 @@ function toRequest(item: MediaResult): MediaRequest {
     source: item.source,
     mediaType: item.mediaType,
     groupKey: item.groupKey,
-    alternatives: item.alternatives,
   }
 }
 
@@ -875,7 +875,7 @@ export default function App() {
 
     try {
       await video.play()
-      setPlayerMessage('Reprodu??o iniciada.')
+      setPlayerMessage('Reprodu\u00e7\u00e3o iniciada.')
       setPlayerState('ready')
     } catch {
       setPlayerMessage('Pronto - pressione Play.')
@@ -950,7 +950,7 @@ export default function App() {
         quality,
       })
       setPlayerMessage(`${response.message}: ${response.filePath}`)
-      showToast('Download conclu?do', 'success')
+      showToast('Download conclu\u00eddo', 'success')
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Erro ao baixar episodio'
       setPlayerMessage(msg)
@@ -1328,7 +1328,7 @@ export default function App() {
               </div>
               <div className="movie-info-card">
                 <h3>Status atual</h3>
-                <p>{movieSourceMode === 'ptbr' ? 'Modo principal ativo: a busca prioriza PT-BR e continua escondendo o FlixHQ.' : 'Modo extra ativo: o FlixHQ aparece como fallback e pode trazer resultados em ingl?s.'}</p>
+                <p>{movieSourceMode === 'ptbr' ? 'Modo principal ativo: a busca prioriza PT-BR e continua escondendo o FlixHQ.' : 'Modo extra ativo: o FlixHQ aparece como fallback e pode trazer resultados em ingl\u00eas.'}</p>
                 <div className="movie-stats">
                   <span>{movieFavorites.length} favorito(s) de filme</span>
                   <span>{movieProgress.length} item(ns) com progresso</span>
@@ -1343,7 +1343,7 @@ export default function App() {
                 <h3>{'Cat\u00e1logo de filmes indispon\u00edvel'}</h3>
                 <p>
                   {movieCatalogError.includes('TMDB_API_KEY')
-                    ? 'Configure a vari?vel TMDB_API_KEY no Windows e abra o app de novo para carregar o cat?logo do TMDb.'
+                    ? 'Configure a vari\u00e1vel TMDB_API_KEY no Windows e abra o app de novo para carregar o cat\u00e1logo do TMDb.'
                     : movieCatalogError}
                 </p>
               </div>
@@ -1546,7 +1546,7 @@ export default function App() {
           <div className="player-controls">
             <div className="control-group">
               <span className="control-label">
-                Episódio{activeProgress ? ` — ${formatEpisodeCounter(activeProgress)}` : ''}
+                Episodio{activeProgress ? ` - ${formatEpisodeCounter(activeProgress)}` : ''}
               </span>
               <div className="episode-list-wrap">
                 {episodes.length === 0 ? (
@@ -1563,7 +1563,7 @@ export default function App() {
                           key={`${episode.url}-${index}`}
                           className={`ep-item${isCurrent ? ' current' : ''}${watched ? ' watched' : ''}${lastWatched ? ' last-watched' : ''}`}
                           onClick={() => setEpisodeIndex(index)}
-                          title={episode.title || `Epis?dio ${epNum}`}
+                          title={episode.title || `Epis\u00f3dio ${epNum}`}
                         >
                           <span className="ep-item-num">Ep {epNum}</span>
                           {episode.title && <span className="ep-item-title">{episode.title}</span>}
@@ -1579,7 +1579,7 @@ export default function App() {
             <div className="control-row">
               <div className="control-group">
                 <span className="control-label">
-                  {'?udio'}
+                  {'\u00c1udio'}
                   {activeMedia && dubSources.has(activeMedia.source.toLowerCase()) && (
                     <span className="control-label-hint" title="Fonte j? fornece apenas dublado">{'\u00b7'} fixo</span>
                   )}
@@ -1622,7 +1622,7 @@ export default function App() {
                 onClick={() => canNext && setEpisodeIndex(index => index + 1)}
                 disabled={!canNext}
               >
-                <IconSkip /> Proximo episodio
+                <IconSkip /> Pr{'\u00f3'}ximo epis{'\u00f3'}dio
               </button>
             </div>
 
@@ -1692,6 +1692,8 @@ export default function App() {
     </div>
   )
 }
+
+
 
 
 

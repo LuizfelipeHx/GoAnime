@@ -12,6 +12,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper"
 )
 
 const anilistEndpoint = "https://graphql.anilist.co"
@@ -75,25 +78,26 @@ func (a *App) GetCatalog() []CatalogSection {
 	now := time.Now()
 	season := currentAniListSeason(now.Month())
 	year := now.Year()
+	bakashiSections := a.fetchBakashiCatalogSections()
 
 	type task struct {
-		idx         int
-		label       string
+		idx   int
+		label string
 		// AniList params (jikanFilter == "" means use AniList)
-		sort        []string
-		season      string
-		year        int
+		sort   []string
+		season string
+		year   int
 		// Jikan params
 		jikanFilter string // "score", "airing", "upcoming", "bypopularity", "season"
 	}
 
 	tasks := []task{
-		{0, "Em alta agora",           []string{"TRENDING_DESC"},    "",     0,    ""},
-		{1, "Mais populares",          []string{"POPULARITY_DESC"},  "",     0,    ""},
-		{2, "Temporada atual",         []string{"POPULARITY_DESC"},  season, year, ""},
-		{3, "Top Anime (MAL)",         nil, "", 0, "score"},
+		{0, "Em alta agora", []string{"TRENDING_DESC"}, "", 0, ""},
+		{1, "Mais populares", []string{"POPULARITY_DESC"}, "", 0, ""},
+		{2, "Temporada atual", []string{"POPULARITY_DESC"}, season, year, ""},
+		{3, "Top Anime (MAL)", nil, "", 0, "score"},
 		{4, "Em exibição agora (MAL)", nil, "", 0, "airing"},
-		{5, "Próximos lançamentos",    nil, "", 0, "upcoming"},
+		{5, "Próximos lançamentos", nil, "", 0, "upcoming"},
 	}
 
 	type indexedResult struct {
@@ -138,7 +142,8 @@ func (a *App) GetCatalog() []CatalogSection {
 		ordered[r.idx] = CatalogSection{Label: r.label, Items: r.items}
 	}
 
-	sections := make([]CatalogSection, 0, len(ordered))
+	sections := make([]CatalogSection, 0, len(bakashiSections)+len(ordered))
+	sections = append(sections, bakashiSections...)
 	for _, s := range ordered {
 		if len(s.Items) > 0 {
 			sections = append(sections, s)
@@ -205,8 +210,8 @@ func fetchJikanCatalogSection(client *http.Client, filter string, limit int) ([]
 					ImageURL      string `json:"image_url"`
 				} `json:"jpg"`
 			} `json:"images"`
-			Score    float64 `json:"score"`
-			Genres   []struct {
+			Score  float64 `json:"score"`
+			Genres []struct {
 				Name string `json:"name"`
 			} `json:"genres"`
 			Episodes int    `json:"episodes"`
@@ -353,5 +358,72 @@ func currentAniListSeason(m time.Month) string {
 		return "SUMMER"
 	default:
 		return "FALL"
+	}
+}
+
+func (a *App) fetchBakashiCatalogSections() []CatalogSection {
+	client := scraper.NewBakashiClient()
+	rawSections, err := client.GetCatalogSections()
+	if err != nil || len(rawSections) == 0 {
+		return nil
+	}
+
+	sections := make([]CatalogSection, 0, len(rawSections))
+	for sectionIdx, raw := range rawSections {
+		items := make([]CatalogItem, 0, len(raw.Items))
+		for itemIdx, media := range raw.Items {
+			if media == nil {
+				continue
+			}
+			items = append(items, bakashiCatalogItem(sectionIdx, itemIdx, media))
+		}
+		if len(items) == 0 {
+			continue
+		}
+		sections = append(sections, CatalogSection{
+			Label: raw.Label,
+			Items: items,
+		})
+	}
+	return sections
+}
+
+func bakashiCatalogItem(sectionIdx int, itemIdx int, media *models.Anime) CatalogItem {
+	title := strings.TrimSpace(media.Name)
+	description := strings.TrimSpace(media.Overview)
+	if description == "" {
+		switch media.MediaType {
+		case models.MediaTypeMovie:
+			description = "Filme de anime no Bakashi"
+		default:
+			description = "Catalogo PT-BR do Bakashi"
+		}
+	}
+
+	status := "RELEASING"
+	if media.MediaType == models.MediaTypeMovie {
+		status = "FINISHED"
+	}
+
+	genres := []string{"Bakashi"}
+	if media.MediaType == models.MediaTypeMovie {
+		genres = append(genres, "Filme")
+	} else {
+		genres = append(genres, "Anime")
+	}
+	if strings.TrimSpace(media.Year) != "" {
+		genres = append(genres, media.Year)
+	}
+
+	cover := strings.TrimSpace(media.ImageURL)
+	return CatalogItem{
+		ID:          20000000 + sectionIdx*1000 + itemIdx,
+		Title:       title,
+		CoverImage:  cover,
+		BannerImage: cover,
+		Score:       media.Rating,
+		Genres:      genres,
+		Description: description,
+		Status:      status,
 	}
 }

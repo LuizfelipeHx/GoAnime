@@ -8,8 +8,10 @@ import (
 	"net/url"
 	"os/exec"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -168,6 +170,10 @@ func extractURLWithYtDlp(pageURL string) (string, error) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, ytdlpPath, "--no-warnings", "--no-playlist", "-g", "--format", "best", pageURL)
+	// Hide console window on Windows to avoid visible CMD flashing
+	if runtime.GOOS == "windows" {
+		cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("yt-dlp nao conseguiu extrair URL de %s: %w", pageURL, err)

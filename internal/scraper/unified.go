@@ -23,10 +23,9 @@ const (
 	// perScraperTimeout is the timeout for individual scrapers
 	perScraperTimeout = 20 * time.Second
 	// earlyReturnDelay is the time to wait after first results before returning
-	// Reduced from 3s since sources typically respond within 1s
-	earlyReturnDelay = 1500 * time.Millisecond
+	earlyReturnDelay = 2000 * time.Millisecond
 	// minResultsForEarlyReturn is the minimum results needed to trigger early return
-	minResultsForEarlyReturn = 5
+	minResultsForEarlyReturn = 8
 )
 
 const (
@@ -36,6 +35,7 @@ const (
 	FlixHQType         // Movies and TV Shows source
 	AnimesOnlineccType // PT-BR source via animesonlinecc.to
 	AnrollType         // PT-BR source via anroll.tv
+	BakashiType        // PT-BR source via bakashi.to
 )
 
 // UnifiedScraper provides a common interface for all scrapers
@@ -63,6 +63,7 @@ func NewScraperManager() *ScraperManager {
 	manager.scrapers[FlixHQType] = &FlixHQAdapter{client: NewFlixHQClient()}
 	manager.scrapers[AnimesOnlineccType] = &AnimesOnlineccAdapter{client: NewAnimesonlineccClient()}
 	manager.scrapers[AnrollType] = &AnrollAdapter{client: NewAnrollClient()}
+	manager.scrapers[BakashiType] = &BakashiAdapter{client: NewBakashiClient()}
 
 	// AnimeDrive - Currently on standby
 	// Reason: Site is protected by Cloudflare, no bypass solution found yet
@@ -357,6 +358,8 @@ func (sm *ScraperManager) getScraperDisplayName(scraperType ScraperType) string 
 		return "AnimesOnlineCC"
 	case AnrollType:
 		return "Anroll"
+	case BakashiType:
+		return "Bakashi"
 	default:
 		return "Desconhecido"
 	}
@@ -376,6 +379,8 @@ func (sm *ScraperManager) getLanguageTag(scraperType ScraperType) string {
 	case AnimesOnlineccType:
 		return "[Portuguese]"
 	case AnrollType:
+		return "[Portuguese]"
+	case BakashiType:
 		return "[Portuguese]"
 	default:
 		return "[Unknown]"
@@ -644,4 +649,27 @@ func (a *AnrollAdapter) GetStreamURL(episodeURL string, options ...interface{}) 
 
 func (a *AnrollAdapter) GetType() ScraperType {
 	return AnrollType
+}
+
+// BakashiAdapter adapts BakashiClient to UnifiedScraper interface
+type BakashiAdapter struct {
+	client *BakashiClient
+}
+
+func (a *BakashiAdapter) SearchAnime(query string, options ...interface{}) ([]*models.Anime, error) {
+	return a.client.SearchAnime(query)
+}
+
+func (a *BakashiAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	return a.client.GetAnimeEpisodes(animeURL)
+}
+
+func (a *BakashiAdapter) GetStreamURL(episodeURL string, options ...interface{}) (string, map[string]string, error) {
+	url, err := a.client.GetEpisodeStreamURL(episodeURL)
+	metadata := map[string]string{"source": "bakashi"}
+	return url, metadata, err
+}
+
+func (a *BakashiAdapter) GetType() ScraperType {
+	return BakashiType
 }
