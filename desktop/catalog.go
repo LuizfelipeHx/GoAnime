@@ -449,10 +449,10 @@ func bakashiCatalogItem(sectionIdx int, itemIdx int, media *models.Anime) Catalo
 // GetGenres returns the list of available anime genres for filtering.
 func (a *App) GetGenres() []string {
 	return []string{
-		"Action", "Adventure", "Comedy", "Drama", "Fantasy",
-		"Horror", "Mystery", "Romance", "Sci-Fi", "Slice of Life",
-		"Sports", "Supernatural", "Thriller", "Mecha", "Music",
-		"Psychological", "Ecchi", "Shounen", "Shoujo", "Seinen", "Isekai",
+		"Action", "Adventure", "Comedy", "Drama", "Ecchi", "Fantasy",
+		"Horror", "Mahou Shoujo", "Mecha", "Music", "Mystery",
+		"Psychological", "Romance", "Sci-Fi", "Slice of Life",
+		"Sports", "Supernatural", "Thriller",
 	}
 }
 

@@ -1019,12 +1019,12 @@ export default function App() {
 
   const genreLabels: Record<string, string> = {
     'Action': 'A\u00e7\u00e3o', 'Adventure': 'Aventura', 'Comedy': 'Com\u00e9dia',
-    'Drama': 'Drama', 'Fantasy': 'Fantasia', 'Horror': 'Horror',
-    'Mystery': 'Mist\u00e9rio', 'Romance': 'Romance', 'Sci-Fi': 'Fic\u00e7\u00e3o Cient\u00edfica',
-    'Slice of Life': 'Slice of Life', 'Sports': 'Esporte', 'Supernatural': 'Sobrenatural',
-    'Thriller': 'Suspense', 'Mecha': 'Mecha', 'Music': 'Musical',
-    'Psychological': 'Psicol\u00f3gico', 'Ecchi': 'Ecchi', 'Shounen': 'Shounen',
-    'Shoujo': 'Shoujo', 'Seinen': 'Seinen', 'Isekai': 'Isekai',
+    'Drama': 'Drama', 'Ecchi': 'Ecchi', 'Fantasy': 'Fantasia',
+    'Horror': 'Horror', 'Mahou Shoujo': 'Mahou Shoujo', 'Mecha': 'Mecha',
+    'Music': 'Musical', 'Mystery': 'Mist\u00e9rio', 'Psychological': 'Psicol\u00f3gico',
+    'Romance': 'Romance', 'Sci-Fi': 'Fic\u00e7\u00e3o Cient\u00edfica',
+    'Slice of Life': 'Slice of Life', 'Sports': 'Esporte',
+    'Supernatural': 'Sobrenatural', 'Thriller': 'Suspense',
   }
 
   function handleGenreSelect(genre: string) {
