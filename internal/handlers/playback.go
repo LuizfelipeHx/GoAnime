@@ -55,8 +55,13 @@ func HandlePlaybackMode(animeName string) {
 		detailsTimer.Stop()
 
 		episodesTimer := util.StartTimer("GetAnimeEpisodes")
-		episodes := appflow.GetAnimeEpisodes(anime)
+		episodes, err := appflow.GetAnimeEpisodes(anime)
 		episodesTimer.Stop()
+
+		if err != nil {
+			util.PrintErrorBox("Episódios não encontrados", err.Error()+"\n\nTente buscar o anime novamente ou use outra fonte.")
+			continue // volta ao loop de busca
+		}
 
 		util.PerfCount("anime_loaded")
 

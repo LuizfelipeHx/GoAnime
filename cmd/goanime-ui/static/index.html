@@ -1,0 +1,117 @@
+﻿<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GoAnime UI</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="bg-orb orb-a"></div>
+    <div class="bg-orb orb-b"></div>
+    <div class="bg-grid"></div>
+
+    <main class="app-shell">
+      <header class="hero fade-in">
+        <p class="eyebrow">GoAnime Visual</p>
+        <h1>Sua central para Anime, Filme e Serie</h1>
+        <p class="hero-copy">
+          Busca visual, lista de episodios e player local no navegador.
+        </p>
+      </header>
+
+      <section class="controls fade-in-up">
+        <label class="search-wrap">
+          <span class="search-label">Buscar titulo</span>
+          <input id="searchInput" type="text" placeholder="Ex.: One Piece, Interstellar, The Last of Us" />
+        </label>
+
+        <div class="filter-row">
+          <div class="type-group" id="typeGroup">
+            <button class="pill active" data-type="all" type="button">Tudo</button>
+            <button class="pill" data-type="anime" type="button">Anime</button>
+            <button class="pill" data-type="movie" type="button">Filme</button>
+            <button class="pill" data-type="tv" type="button">Serie</button>
+          </div>
+
+          <label class="source-wrap">
+            <span>Fonte</span>
+            <select id="sourceSelect">
+              <option value="all">Todas</option>
+              <option value="allanime">AllAnime</option>
+              <option value="animefire">AnimeFire</option>
+              <option value="flixhq">FlixHQ</option>
+              <option value="animesonlinecc">AnimesOnlineCC</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section class="status-row fade-in-up">
+        <p id="statusText">Digite pelo menos 2 caracteres para buscar.</p>
+      </section>
+
+      <section id="watchPanel" class="watch-panel hidden">
+        <div class="watch-head">
+          <h2 id="watchTitle">Player</h2>
+          <p id="watchMeta">Selecione um item para carregar episodios.</p>
+        </div>
+
+        <div class="watch-controls">
+          <label>
+            Episodio
+            <select id="episodeSelect"></select>
+          </label>
+          <label>
+            Audio
+            <select id="modeSelect">
+              <option value="sub">Sub</option>
+              <option value="dub">Dub</option>
+            </select>
+          </label>
+          <label>
+            Qualidade
+            <select id="qualitySelect">
+              <option value="best">Best</option>
+              <option value="1080p">1080p</option>
+              <option value="720p">720p</option>
+              <option value="480p">480p</option>
+              <option value="worst">Worst</option>
+            </select>
+          </label>
+          <button id="playButton" class="action copy-btn" type="button">Assistir agora</button>
+        </div>
+
+        <video id="videoPlayer" controls playsinline preload="metadata"></video>
+        <p id="playerStatus">Player aguardando selecao.</p>
+      </section>
+
+      <section id="resultsGrid" class="results-grid"></section>
+    </main>
+
+    <template id="cardTemplate">
+      <article class="media-card">
+        <div class="poster">
+          <img loading="lazy" alt="" />
+          <div class="poster-fallback">GOANIME</div>
+        </div>
+        <div class="card-content">
+          <div class="chip-row">
+            <span class="chip chip-type"></span>
+            <span class="chip chip-source"></span>
+          </div>
+          <h3 class="title"></h3>
+          <p class="meta"></p>
+          <div class="actions">
+            <button class="action play-btn" type="button">Assistir aqui</button>
+            <button class="action copy-btn" type="button">Copiar comando</button>
+            <a class="action ghost open-link" href="#" target="_blank" rel="noreferrer">Abrir pagina</a>
+          </div>
+        </div>
+      </article>
+    </template>
+
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

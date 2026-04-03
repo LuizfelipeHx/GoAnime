@@ -683,7 +683,7 @@ func getEpisodeTitle(title models.TitleDetails) string {
 	if title.Japanese != "" {
 		return title.Japanese
 	}
-	return "No title"
+	return ""
 }
 
 // findEpisodeIndex finds the episode index
@@ -932,7 +932,7 @@ func playPreviousEpisode(newIndex int, episodes []models.Episode, anilistID int,
 
 // selectEpisode allows selecting an episode
 func selectEpisode(episodes []models.Episode, anilistID int, updater *discord.RichPresenceUpdater, stopTracking chan struct{}, socketPath string) error {
-	selectedURL, selectedNumStr, err := SelectEpisodeWithFuzzyFinder(episodes)
+	selectedURL, selectedNumStr, err := SelectEpisodeWithFuzzyFinder(episodes, nil)
 	if err != nil {
 		// If user selected back, return nil to continue without action
 		if errors.Is(err, ErrBackRequested) {

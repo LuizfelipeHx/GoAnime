@@ -99,17 +99,21 @@ func PlayEpisode(
 }
 
 func SelectEpisodeWithFuzzy(episodes []models.Episode) (string, string, int) {
-	url, numStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
+	url, numStr, err := player.SelectEpisodeWithFuzzyFinder(episodes, nil)
 	if err != nil {
 		// If user selected back, return empty values to signal back request
 		if errors.Is(err, player.ErrBackRequested) {
 			return "", "back", -1
 		}
-		log.Fatalln(util.ErrorHandler(err))
+		// Log the error but don't crash — return "back" sentinel so caller can continue
+		log.Printf("Episode selection error: %v", util.ErrorHandler(err))
+		return "", "back", -1
 	}
 	epNum, err := strconv.Atoi(player.ExtractEpisodeNumber(numStr))
 	if err != nil {
-		log.Fatalln("Error converting episode number:", util.ErrorHandler(err))
+		// Can't parse episode number — log and return back sentinel
+		log.Printf("Error converting episode number: %v", util.ErrorHandler(err))
+		return "", "back", -1
 	}
 	return url, numStr, epNum
 }

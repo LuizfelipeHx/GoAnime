@@ -127,6 +127,27 @@ func PrintErrorBox(title, message string) {
 	fmt.Fprintln(os.Stderr, boxStyle.Render(content))
 }
 
+// PrintWarningBox exibe um painel de aviso estilizado no terminal.
+func PrintWarningBox(title, message string) {
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#1A1A00")).
+		Bold(true)
+
+	msgStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#3D3000"))
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#FFB300")).
+		Background(lipgloss.Color("#FFF8E1")).
+		Padding(0, 2).
+		MarginTop(1).
+		MarginBottom(1)
+
+	content := titleStyle.Render("⚠  "+title) + "\n" + msgStyle.Render(message)
+	fmt.Fprintln(os.Stderr, boxStyle.Render(content))
+}
+
 // FriendlyPlaybackError traduz erros técnicos para mensagens amigáveis.
 // Retorna (título, detalhe) para passar ao PrintErrorBox.
 func FriendlyPlaybackError(err error) (string, string) {

@@ -478,7 +478,6 @@ func (c *AllAnimeClient) processSourceURLsConcurrent(sourceURLs []string, qualit
 	}
 
 	results := make(chan result, len(sourceURLs))
-	highPriorityLink := make(chan string, 1)
 
 	// Rate limiter like in Curd
 	rateLimiter := time.NewTicker(50 * time.Millisecond)
@@ -490,46 +489,13 @@ func (c *AllAnimeClient) processSourceURLsConcurrent(sourceURLs []string, qualit
 			<-rateLimiter.C // Rate limit the requests
 
 			links, err := c.getLinks(url)
-			if err != nil {
-				results <- result{index: idx, err: err, sourceURL: url}
-				return
-			}
-
-			// Check for high priority links first
-			for _, link := range links {
-				for _, domain := range LinkPriorities[:3] { // Check top 3 priority domains
-					if strings.Contains(link, domain) {
-						// Found high priority link, send it immediately
-						select {
-						case highPriorityLink <- link:
-						default:
-							// Channel already has a high priority link
-						}
-						break
-					}
-				}
-			}
-
-			results <- result{index: idx, links: links, sourceURL: url}
+			results <- result{index: idx, links: links, err: err, sourceURL: url}
 		}(i, sourceURL)
 	}
 
-	// First, try to get a high priority link quickly
-	select {
-	case link := <-highPriorityLink:
-		// Found high priority link, return it immediately
-		metadata := map[string]string{
-			"quality":  quality,
-			"anime_id": animeID,
-			"episode":  episodeNo,
-			"priority": "high",
-		}
-		return link, metadata, nil
-	case <-time.After(2 * time.Second): // Wait briefly for high priority link
-		// No high priority link found quickly, proceed with normal collection
-	}
-
-	// Collect results with timeout
+	// Collect results with timeout — all mirrors compete equally.
+	// Priority domains are still preferred via getPriorityScore in the collection loop,
+	// but no mirror gets an unconditional early return that bypasses quality selection.
 	timeout := time.After(10 * time.Second)
 	successCount := 0
 	var bestURL string

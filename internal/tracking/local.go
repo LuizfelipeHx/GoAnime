@@ -318,6 +318,7 @@ func prepareStatements(db *sql.DB) (*preparedStatements, error) {
 		playback_time, 
 		duration, 
 		title, 
+		media_type,
 		last_updated 
 	FROM media_progress 
 	WHERE allanime_id = ?`)
@@ -333,6 +334,7 @@ func prepareStatements(db *sql.DB) (*preparedStatements, error) {
 		playback_time, 
 		duration, 
 		title, 
+		media_type,
 		last_updated 
 	FROM media_progress`)
 
@@ -434,6 +436,7 @@ func (t *LocalTracker) GetAnime(anilistID int, allanimeID string) (*Anime, error
 		&a.PlaybackTime,
 		&a.Duration,
 		&a.Title,
+		&a.MediaType,
 		&ts,
 	)
 
@@ -486,6 +489,7 @@ func (t *LocalTracker) GetAllAnime() ([]Anime, error) {
 			&a.PlaybackTime,
 			&a.Duration,
 			&a.Title,
+			&a.MediaType,
 			&ts,
 		); err != nil {
 			return nil, fmt.Errorf("row scan failed: %w", err)

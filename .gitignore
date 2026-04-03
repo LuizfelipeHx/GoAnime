@@ -19,3 +19,19 @@ result
 
 #Ignore vscode AI rules
 .github/copilot-instructions.md
+
+# Desktop frontend dependencies
+/desktop/frontend/node_modules/
+
+# Local scraping/debug artifacts
+/goanime.exe~
+/desktop.exe
+/desktop/desktop.exe
+/anroll_animes.html
+/anroll_autoptimize.js
+/anroll_front_ajax.min.js
+/anroll_jigokuraku.html
+/anroll_jigokuraku_ep1.html
+/desktop/build/bin/
+/desktop/frontend/dist/
+*.tsbuildinfo

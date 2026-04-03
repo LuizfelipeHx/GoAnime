@@ -184,6 +184,8 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 		sourceName = "Animefire.io"
 	} else if anime.Source == "AnimeDrive" {
 		sourceName = "AnimeDrive"
+	} else if strings.Contains(strings.ToLower(anime.Source), "anroll") {
+		sourceName = "Anroll"
 	} else if strings.Contains(anime.Name, "[English]") {
 		// Priority 2: Check language tags (AllAnime = English)
 		sourceName = "AllAnime"
@@ -210,6 +212,9 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 		// Priority 5: URL analysis for AnimeDrive
 		sourceName = "AnimeDrive"
 		anime.Source = "AnimeDrive" // Update source field
+	} else if strings.Contains(anime.URL, "anroll.tv") {
+		sourceName = "Anroll"
+		anime.Source = "Anroll"
 	} else {
 		// Default to AllAnime for unknown sources
 		sourceName = "AllAnime (default)"
@@ -249,6 +254,13 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 			return nil, fmt.Errorf("failed to get AnimeDrive scraper: %w", scErr)
 		}
 		episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
+	} else if sourceName == "Anroll" {
+		scraperManager := scraper.NewScraperManager()
+		scraperInstance, scErr := scraperManager.GetScraper(scraper.AnrollType)
+		if scErr != nil {
+			return nil, fmt.Errorf("failed to get Anroll scraper: %w", scErr)
+		}
+		episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
 	} else {
 		// For AnimeFire and others, use the original API function
 		episodes, err = GetAnimeEpisodes(anime.URL)
@@ -266,6 +278,8 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 			util.Debug("Source info", "type", "AllAnime", "quality", "high")
 		} else if sourceName == "AnimeDrive" {
 			util.Debug("Source info", "type", "AnimeDrive", "features", "multiple qualities")
+		} else if sourceName == "Anroll" {
+			util.Debug("Source info", "type", "Anroll", "features", "catalog and episodes")
 		} else {
 			util.Debug("Source info", "type", "Animefire.io", "features", "dubbed/subtitled")
 		}
@@ -300,6 +314,9 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 	} else if anime.Source == "AnimeDrive" {
 		scraperType = scraper.AnimeDriveType
 		sourceName = "AnimeDrive"
+	} else if strings.Contains(strings.ToLower(anime.Source), "anroll") {
+		scraperType = scraper.AnrollType
+		sourceName = "Anroll"
 	} else if strings.Contains(anime.Name, "[English]") {
 		// Priority 2: Check language tags (AllAnime = English)
 		scraperType = scraper.AllAnimeType
@@ -326,6 +343,9 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 		// Priority 5: URL analysis for AnimeDrive
 		scraperType = scraper.AnimeDriveType
 		sourceName = "AnimeDrive"
+	} else if strings.Contains(anime.URL, "anroll.tv") {
+		scraperType = scraper.AnrollType
+		sourceName = "Anroll"
 	} else if strings.Contains(anime.URL, "allanime") {
 		// Priority 6: AllAnime full URLs
 		scraperType = scraper.AllAnimeType

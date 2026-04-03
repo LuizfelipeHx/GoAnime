@@ -31,6 +31,9 @@ func main() {
 	// Initialize tracker early in background to avoid delays when playing movies
 	player.InitTrackerAsync()
 
+	// Warn if yt-dlp binary is outdated
+	util.CheckYtDlpAge()
+
 	animeName, err := util.FlagParser()
 	if err != nil {
 		// Check if error is update request

@@ -56,7 +56,7 @@ func (c *TMDBClient) IsConfigured() bool {
 
 // SearchMulti searches for both movies and TV shows
 func (c *TMDBClient) SearchMulti(query string) (*models.TMDBSearchResult, error) {
-	endpoint := fmt.Sprintf("%s/search/multi?query=%s&include_adult=false&language=en-US&page=1",
+	endpoint := fmt.Sprintf("%s/search/multi?query=%s&include_adult=false&language=pt-BR&page=1",
 		c.baseURL, url.QueryEscape(query))
 
 	body, err := c.makeRequest(endpoint)
@@ -83,7 +83,7 @@ func (c *TMDBClient) SearchMulti(query string) (*models.TMDBSearchResult, error)
 
 // SearchMovies searches for movies only
 func (c *TMDBClient) SearchMovies(query string) (*models.TMDBSearchResult, error) {
-	endpoint := fmt.Sprintf("%s/search/movie?query=%s&include_adult=false&language=en-US&page=1",
+	endpoint := fmt.Sprintf("%s/search/movie?query=%s&include_adult=false&language=pt-BR&region=BR&page=1",
 		c.baseURL, url.QueryEscape(query))
 
 	body, err := c.makeRequest(endpoint)
@@ -106,7 +106,7 @@ func (c *TMDBClient) SearchMovies(query string) (*models.TMDBSearchResult, error
 
 // SearchTV searches for TV shows only
 func (c *TMDBClient) SearchTV(query string) (*models.TMDBSearchResult, error) {
-	endpoint := fmt.Sprintf("%s/search/tv?query=%s&include_adult=false&language=en-US&page=1",
+	endpoint := fmt.Sprintf("%s/search/tv?query=%s&include_adult=false&language=pt-BR&page=1",
 		c.baseURL, url.QueryEscape(query))
 
 	body, err := c.makeRequest(endpoint)
@@ -129,7 +129,7 @@ func (c *TMDBClient) SearchTV(query string) (*models.TMDBSearchResult, error) {
 
 // GetMovieDetails gets detailed information about a movie
 func (c *TMDBClient) GetMovieDetails(movieID int) (*models.TMDBDetails, error) {
-	endpoint := fmt.Sprintf("%s/movie/%d?language=en-US", c.baseURL, movieID)
+	endpoint := fmt.Sprintf("%s/movie/%d?language=pt-BR", c.baseURL, movieID)
 
 	body, err := c.makeRequest(endpoint)
 	if err != nil {
@@ -146,7 +146,7 @@ func (c *TMDBClient) GetMovieDetails(movieID int) (*models.TMDBDetails, error) {
 
 // GetTVDetails gets detailed information about a TV show
 func (c *TMDBClient) GetTVDetails(tvID int) (*models.TMDBDetails, error) {
-	endpoint := fmt.Sprintf("%s/tv/%d?language=en-US", c.baseURL, tvID)
+	endpoint := fmt.Sprintf("%s/tv/%d?language=pt-BR", c.baseURL, tvID)
 
 	body, err := c.makeRequest(endpoint)
 	if err != nil {
@@ -163,7 +163,7 @@ func (c *TMDBClient) GetTVDetails(tvID int) (*models.TMDBDetails, error) {
 
 // GetTVSeasons gets season information for a TV show
 func (c *TMDBClient) GetTVSeasons(tvID int) ([]models.TMDBSeason, error) {
-	endpoint := fmt.Sprintf("%s/tv/%d?language=en-US", c.baseURL, tvID)
+	endpoint := fmt.Sprintf("%s/tv/%d?language=pt-BR", c.baseURL, tvID)
 	body, err := c.makeRequest(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get TV seasons: %w", err)
@@ -181,7 +181,7 @@ func (c *TMDBClient) GetTVSeasons(tvID int) ([]models.TMDBSeason, error) {
 
 // GetSeasonEpisodes gets episodes for a specific season
 func (c *TMDBClient) GetSeasonEpisodes(tvID, seasonNumber int) ([]models.TMDBEpisode, error) {
-	endpoint := fmt.Sprintf("%s/tv/%d/season/%d?language=en-US", c.baseURL, tvID, seasonNumber)
+	endpoint := fmt.Sprintf("%s/tv/%d/season/%d?language=pt-BR", c.baseURL, tvID, seasonNumber)
 
 	body, err := c.makeRequest(endpoint)
 	if err != nil {
@@ -200,7 +200,7 @@ func (c *TMDBClient) GetSeasonEpisodes(tvID, seasonNumber int) ([]models.TMDBEpi
 
 // GetCredits gets cast and crew for a movie or TV show
 func (c *TMDBClient) GetCredits(mediaType string, mediaID int) (*models.TMDBCredits, error) {
-	endpoint := fmt.Sprintf("%s/%s/%d/credits?language=en-US", c.baseURL, mediaType, mediaID)
+	endpoint := fmt.Sprintf("%s/%s/%d/credits?language=pt-BR", c.baseURL, mediaType, mediaID)
 
 	body, err := c.makeRequest(endpoint)
 	if err != nil {
@@ -253,7 +253,7 @@ func (c *TMDBClient) GetTrending(mediaType string, timeWindow string) (*models.T
 		timeWindow = "week"
 	}
 
-	endpoint := fmt.Sprintf("%s/trending/%s/%s?language=en-US", c.baseURL, mediaType, timeWindow)
+	endpoint := fmt.Sprintf("%s/trending/%s/%s?language=pt-BR", c.baseURL, mediaType, timeWindow)
 
 	body, err := c.makeRequest(endpoint)
 	if err != nil {
@@ -270,7 +270,7 @@ func (c *TMDBClient) GetTrending(mediaType string, timeWindow string) (*models.T
 
 // GetPopular gets popular movies or TV shows
 func (c *TMDBClient) GetPopular(mediaType string) (*models.TMDBSearchResult, error) {
-	endpoint := fmt.Sprintf("%s/%s/popular?language=en-US&page=1", c.baseURL, mediaType)
+	endpoint := fmt.Sprintf("%s/%s/popular?language=pt-BR&page=1", c.baseURL, mediaType)
 
 	body, err := c.makeRequest(endpoint)
 	if err != nil {
@@ -288,6 +288,75 @@ func (c *TMDBClient) GetPopular(mediaType string) (*models.TMDBSearchResult, err
 	}
 
 	return &result, nil
+}
+
+// GetNowPlaying gets the movies currently in theaters for Brazil.
+func (c *TMDBClient) GetNowPlaying() (*models.TMDBSearchResult, error) {
+	endpoint := fmt.Sprintf("%s/movie/now_playing?language=pt-BR&region=BR&page=1", c.baseURL)
+
+	body, err := c.makeRequest(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get now playing: %w", err)
+	}
+
+	var result models.TMDBSearchResult
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse now playing response: %w", err)
+	}
+
+	for i := range result.Results {
+		result.Results[i].MediaType = "movie"
+	}
+
+	return &result, nil
+}
+
+// GetUpcoming gets upcoming movie releases for Brazil.
+func (c *TMDBClient) GetUpcoming() (*models.TMDBSearchResult, error) {
+	endpoint := fmt.Sprintf("%s/movie/upcoming?language=pt-BR&region=BR&page=1", c.baseURL)
+
+	body, err := c.makeRequest(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get upcoming: %w", err)
+	}
+
+	var result models.TMDBSearchResult
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse upcoming response: %w", err)
+	}
+
+	for i := range result.Results {
+		result.Results[i].MediaType = "movie"
+	}
+
+	return &result, nil
+}
+
+// GetMovieGenres gets the localized movie genre names.
+func (c *TMDBClient) GetMovieGenres() (map[int]string, error) {
+	endpoint := fmt.Sprintf("%s/genre/movie/list?language=pt-BR", c.baseURL)
+
+	body, err := c.makeRequest(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get movie genres: %w", err)
+	}
+
+	var result struct {
+		Genres []models.TMDBGenre `json:"genres"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse movie genres response: %w", err)
+	}
+
+	genres := make(map[int]string, len(result.Genres))
+	for _, genre := range result.Genres {
+		if genre.ID == 0 || strings.TrimSpace(genre.Name) == "" {
+			continue
+		}
+		genres[genre.ID] = strings.TrimSpace(genre.Name)
+	}
+
+	return genres, nil
 }
 
 // makeRequest performs an authenticated request to TMDB API

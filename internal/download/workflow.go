@@ -2,6 +2,7 @@
 package download
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/alvarorichard/Goanime/internal/api"
@@ -55,9 +56,12 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 				if err := api.DownloadEpisodeRangeEnhanced(anime, request.StartEpisode, request.EndEpisode, quality); err != nil {
 					util.Infof("Enhanced download failed, falling back to legacy: %v", err)
 					// Fallback to legacy downloader
-					episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
-					downloader := downloader.NewEpisodeDownloader(episodes, anime.URL)
-					return downloader.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
+					episodes, epErr := appflow.GetAnimeEpisodesLegacy(anime.URL)
+					if epErr != nil {
+						return fmt.Errorf("falha ao obter episódios: %w", epErr)
+					}
+					dl := downloader.NewEpisodeDownloader(episodes, anime.URL)
+					return dl.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
 				}
 				return nil
 			}
@@ -68,9 +72,12 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 		if err := api.DownloadEpisodeRangeEnhanced(anime, request.StartEpisode, request.EndEpisode, quality); err != nil {
 			util.Infof("Enhanced download failed, falling back to legacy: %v", err)
 			// Fallback to legacy downloader
-			episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
-			downloader := downloader.NewEpisodeDownloader(episodes, anime.URL)
-			return downloader.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
+			episodes, epErr := appflow.GetAnimeEpisodesLegacy(anime.URL)
+			if epErr != nil {
+				return fmt.Errorf("falha ao obter episódios: %w", epErr)
+			}
+			dl := downloader.NewEpisodeDownloader(episodes, anime.URL)
+			return dl.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
 		}
 		return nil
 	} else {
@@ -79,9 +86,12 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 
 		// Enhanced download is a placeholder - use legacy downloader
 		util.Infof("Using legacy downloader for episode %d", request.EpisodeNum)
-		episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
-		downloader := downloader.NewEpisodeDownloader(episodes, anime.URL)
-		return downloader.DownloadSingleEpisode(request.EpisodeNum)
+		episodes, epErr := appflow.GetAnimeEpisodesLegacy(anime.URL)
+		if epErr != nil {
+			return fmt.Errorf("falha ao obter episódios: %w", epErr)
+		}
+		dl := downloader.NewEpisodeDownloader(episodes, anime.URL)
+		return dl.DownloadSingleEpisode(request.EpisodeNum)
 	}
 }
 
@@ -91,29 +101,11 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 func ExampleSingleDownload() {
 	// Command: goanime -d "My Hero Academia" 15
 	// This would create a DownloadRequest like:
-	request := &util.DownloadRequest{
+	_ = &util.DownloadRequest{
 		AnimeName:  "My Hero Academia",
 		EpisodeNum: 15,
 		IsRange:    false,
 	}
-
-	if err := HandleDownloadRequest(request); err != nil {
-		log.Printf("Download failed: %v", err)
-	}
-}
-
-// ExampleRangeDownload demonstrates episode range download
-func ExampleRangeDownload() {
-	// Command: goanime -d -r "Attack on Titan" 1-5
-	// This would create a DownloadRequest like:
-	request := &util.DownloadRequest{
-		AnimeName:    "Attack on Titan",
-		IsRange:      true,
-		StartEpisode: 1,
-		EndEpisode:   5,
-	}
-
-	if err := HandleDownloadRequest(request); err != nil {
-		log.Printf("Range download failed: %v", err)
-	}
+	// Then call: HandleDownloadRequest(request)
+	log.Println("Single download example - see DownloadRequest struct for configuration")
 }

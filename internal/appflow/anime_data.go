@@ -3,7 +3,6 @@ package appflow
 import (
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -14,31 +13,31 @@ import (
 	"github.com/charmbracelet/huh"
 )
 
-func SearchAnime(name string) *models.Anime {
+func SearchAnime(name string) (*models.Anime, error) {
 	searchStart := time.Now()
 
 	// Use enhanced API with source selection
 	anime, err := api.SearchAnimeEnhanced(name, util.GlobalSource)
 	if err != nil {
-		log.Fatalln("Failed to search for anime:", util.ErrorHandler(err))
+		return nil, fmt.Errorf("falha ao buscar anime: %w", err)
 	}
 
 	util.Debugf("[PERF] SearchAnime completed in %v", time.Since(searchStart))
-	return anime
+	return anime, nil
 }
 
 // SearchAnimeEnhanced - busca em ambas as fontes (AllAnime e AnimeFire) simultaneamente
-func SearchAnimeEnhanced(name string) *models.Anime {
+func SearchAnimeEnhanced(name string) (*models.Anime, error) {
 	searchStart := time.Now()
 
 	// Buscar em ambas as fontes (source = "" significa buscar em todas)
 	anime, err := api.SearchAnimeEnhanced(name, "")
 	if err != nil {
-		log.Fatalln("Failed to search for anime:", util.ErrorHandler(err))
+		return nil, fmt.Errorf("falha ao buscar anime: %w", err)
 	}
 
 	util.Debugf("[PERF] SearchAnimeEnhanced completed in %v", time.Since(searchStart))
-	return anime
+	return anime, nil
 }
 
 // SearchAnimeWithRetry - searches for anime with retry logic on failure
@@ -54,6 +53,7 @@ func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 
 		if err == nil && anime != nil {
 			util.Debugf("[PERF] SearchAnimeWithRetry completed in %v", time.Since(searchStart))
+			util.SaveSearch(currentName)
 			return anime, nil
 		}
 
@@ -141,26 +141,32 @@ func FetchAnimeDetails(anime *models.Anime) {
 	util.Debugf("[PERF] FetchAnimeDetails completed in %v", time.Since(detailsStart))
 }
 
-func GetAnimeEpisodes(anime *models.Anime) []models.Episode {
+func GetAnimeEpisodes(anime *models.Anime) ([]models.Episode, error) {
 	episodesStart := time.Now()
 
 	// Use enhanced API for episode fetching
 	episodes, err := api.GetAnimeEpisodesEnhanced(anime)
 	if err != nil || len(episodes) == 0 {
-		log.Fatalln("The selected anime does not have episodes on the server.")
+		if err == nil {
+			err = fmt.Errorf("nenhum episódio encontrado para este anime neste servidor")
+		}
+		return nil, err
 	}
 
 	util.Debugf("[PERF] GetAnimeEpisodes completed in %v", time.Since(episodesStart))
-	return episodes
+	return episodes, nil
 }
 
 // GetAnimeEpisodesLegacy - compatibility function for old URL-based calls
-func GetAnimeEpisodesLegacy(url string) []models.Episode {
+func GetAnimeEpisodesLegacy(url string) ([]models.Episode, error) {
 	episodesStart := time.Now()
 	episodes, err := api.GetAnimeEpisodes(url)
 	if err != nil || len(episodes) == 0 {
-		log.Fatalln("The selected anime does not have episodes on the server.")
+		if err == nil {
+			err = fmt.Errorf("nenhum episódio encontrado para este anime neste servidor")
+		}
+		return nil, err
 	}
 	util.Debugf("[PERF] GetAnimeEpisodesLegacy completed in %v", time.Since(episodesStart))
-	return episodes
+	return episodes, nil
 }

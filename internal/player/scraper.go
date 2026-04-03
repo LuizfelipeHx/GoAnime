@@ -176,8 +176,10 @@ var ErrBackToAnimeSelection = errors.New("back to anime selection")
 // ErrBackToEpisodeSelection is returned when user wants to go back to episode selection
 var ErrBackToEpisodeSelection = errors.New("back to episode selection")
 
-// SelectEpisodeWithFuzzyFinder allows the user to select an episode using fuzzy finder
-func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, error) {
+// SelectEpisodeWithFuzzyFinder allows the user to select an episode using fuzzy finder.
+// watchedEps is an optional map of episode numbers that have been watched (show ✓ prefix).
+// Pass nil to disable watched indicators.
+func SelectEpisodeWithFuzzyFinder(episodes []models.Episode, watchedEps map[string]bool) (string, string, error) {
 	if len(episodes) == 0 {
 		return "", "", errors.New("no episodes provided")
 	}
@@ -187,7 +189,11 @@ func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, er
 	displayList := make([]string, len(episodes)+1)
 	displayList[0] = backOption
 	for i, ep := range episodes {
-		displayList[i+1] = ep.Number
+		if watchedEps != nil && watchedEps[ep.Number] {
+			displayList[i+1] = "✓ " + ep.Number
+		} else {
+			displayList[i+1] = ep.Number
+		}
 	}
 
 	idx, err := fuzzyfinder.Find(
@@ -212,7 +218,9 @@ func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, er
 
 	// Adjust index for episodes (subtract 1 for the back option)
 	episodeIdx := idx - 1
-	return episodes[episodeIdx].URL, episodes[episodeIdx].Number, nil
+	// Strip the watched prefix from the returned episode number string
+	epNumber := strings.TrimPrefix(displayList[idx], "✓ ")
+	return episodes[episodeIdx].URL, epNumber, nil
 }
 
 // ExtractEpisodeNumber extracts the numeric part of an episode string

@@ -156,10 +156,35 @@ func FlagParser() (string, error) {
 	return TreatingAnimeName(animeName), err
 }
 
-// getUserInput prompts the user for input the anime name and returns it
-func getUserInput(label string) (string, error) {
-	var animeName string
+const historyNewSearchSentinel = "__new_search__"
 
+// getUserInput prompts the user for input the anime name and returns it.
+// If there is search history, displays a menu to pick from previous searches or type a new one.
+func getUserInput(label string) (string, error) {
+	history := LoadSearchHistory()
+
+	// If history exists, show a selection menu first
+	if len(history) > 0 {
+		opts := make([]huh.Option[string], 0, len(history)+1)
+		for _, h := range history {
+			opts = append(opts, huh.NewOption(h, h))
+		}
+		opts = append(opts, huh.NewOption("✏️  Nova busca...", historyNewSearchSentinel))
+
+		var choice string
+		sel := huh.NewSelect[string]().
+			Title("Buscas recentes").
+			Description("Selecione uma busca anterior ou pesquise algo novo.").
+			Options(opts...).
+			Value(&choice)
+
+		if err := sel.Run(); err == nil && choice != historyNewSearchSentinel {
+			return choice, nil
+		}
+		// User picked "Nova busca" or pressed ESC → fall through to text input
+	}
+
+	var animeName string
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewInput().

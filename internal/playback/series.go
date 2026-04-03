@@ -11,6 +11,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
+	"github.com/alvarorichard/Goanime/internal/tracking"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/charmbracelet/huh"
 )
@@ -20,7 +21,7 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 	animeMutex := sync.Mutex{}
 	isPaused := false
 
-	selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err := SelectInitialEpisode(episodes)
+	selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err := SelectInitialEpisode(episodes, anime)
 	if err != nil {
 		// If user selected back at initial episode selection, return to anime selection
 		if errors.Is(err, player.ErrBackRequested) {
@@ -50,7 +51,7 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 
 		// Check if user requested to go back to episode selection (from server selection)
 		if errors.Is(err, player.ErrBackToEpisodeSelection) {
-			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes)
+			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes, anime)
 			if err != nil {
 				// If user selected back at episode selection, go back to anime selection
 				if errors.Is(err, player.ErrBackRequested) {
@@ -89,7 +90,7 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			}
 
 			// Select initial episode for the new anime
-			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes)
+			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes, anime)
 			if err != nil {
 				log.Printf("Error selecting episode for new anime: %v", err)
 				continue
@@ -141,7 +142,7 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			}
 
 			// Select initial episode for the new anime
-			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes)
+			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes, anime)
 			if err != nil {
 				log.Printf("Error selecting episode for new anime: %v", err)
 				continue
@@ -153,7 +154,7 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 
 		// Handle episode selection
 		if userInput == "e" {
-			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes)
+			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes, anime)
 			if err != nil {
 				// If user selected back, just continue without changing episode
 				if errors.Is(err, player.ErrBackRequested) {
@@ -165,6 +166,31 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			continue
 		}
 
+		// Handle "mark as watched"
+		if userInput == "w" {
+			if t := tracking.GetGlobalTracker(); t != nil {
+				epDuration := 0
+				epURL := ""
+				if selectedEpisodeNum > 0 && selectedEpisodeNum <= len(episodes) {
+					epDuration = episodes[selectedEpisodeNum-1].Duration
+					epURL = episodes[selectedEpisodeNum-1].URL
+				}
+				_ = t.UpdateProgress(tracking.Anime{
+					AnilistID:     anime.AnilistID,
+					AllanimeID:    epURL,
+					Title:         fmt.Sprintf("Episode %d", selectedEpisodeNum),
+					EpisodeNumber: selectedEpisodeNum,
+					PlaybackTime:  epDuration,
+					Duration:      epDuration,
+					LastUpdated:   time.Now(),
+				})
+				util.Infof("Episódio %d marcado como assistido ✓", selectedEpisodeNum)
+			} else {
+				util.Warnf("Tracking não disponível para marcar episódio como assistido.")
+			}
+			continue
+		}
+
 		selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = handleUserNavigationEnhanced(
 			userInput,
 			episodes,
@@ -172,12 +198,27 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			totalEpisodes,
 			anime,
 		)
+		// If navigation returned sentinel (e.g., episode selection was cancelled), re-show the menu
+		if selectedEpisodeNum < 0 {
+			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes, anime)
+			if err != nil {
+				if errors.Is(err, player.ErrBackRequested) {
+					return player.ErrBackToAnimeSelection
+				}
+				log.Printf("Error selecting episode: %v", err)
+			}
+		}
 	}
 	return nil
 }
 
-func SelectInitialEpisode(episodes []models.Episode) (string, string, int, error) {
-	selectedEpisodeURL, episodeNumberStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
+// SelectInitialEpisode exibe o fuzzy finder de episódios com marcadores ✓ para os assistidos.
+func SelectInitialEpisode(episodes []models.Episode, anime ...*models.Anime) (string, string, int, error) {
+	var watchedEps map[string]bool
+	if len(anime) > 0 && anime[0] != nil {
+		watchedEps = buildWatchedMap(anime[0])
+	}
+	selectedEpisodeURL, episodeNumberStr, err := player.SelectEpisodeWithFuzzyFinder(episodes, watchedEps)
 	if err != nil {
 		// Propagate back request error
 		if errors.Is(err, player.ErrBackRequested) {
@@ -190,6 +231,29 @@ func SelectInitialEpisode(episodes []models.Episode) (string, string, int, error
 		return "", "", 0, err
 	}
 	return selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, nil
+}
+
+// buildWatchedMap constrói um mapa de números de episódios assistidos para o anime atual.
+func buildWatchedMap(anime *models.Anime) map[string]bool {
+	t := tracking.GetGlobalTracker()
+	if t == nil || anime == nil || anime.AnilistID == 0 {
+		return nil
+	}
+	all, err := t.GetAllAnime()
+	if err != nil || len(all) == 0 {
+		return nil
+	}
+	watched := make(map[string]bool)
+	for _, a := range all {
+		// Match by AnilistID (reliable, set by FetchAnimeDetails)
+		if a.AnilistID == anime.AnilistID && a.PlaybackTime > 0 {
+			watched[fmt.Sprintf("%d", a.EpisodeNumber)] = true
+		}
+	}
+	if len(watched) == 0 {
+		return nil
+	}
+	return watched
 }
 
 func handleUserNavigation(input string, episodes []models.Episode, currentNum, totalEpisodes int) (string, string, int) {
