@@ -17,6 +17,9 @@ export type MediaResult = {
   score?: number
   description?: string
   genres?: string[]
+  totalEpisodes?: number
+  anilistId?: number
+  malId?: number
   canonicalTitle?: string
   groupKey?: string
   seasonNumber?: number
@@ -176,6 +179,154 @@ export type CatalogSection = {
   items: CatalogItem[]
 }
 
+export type NyaaRelease = {
+  title: string
+  link: string
+  infoHash?: string
+  size: string
+  date: string
+  seeders: number
+  category?: string
+  isNew: boolean
+}
+
+export type AIRecommendation = {
+  title: string
+  reason: string
+  genres?: string
+  score?: string
+}
+
+export type CuratedRelease = {
+  release: NyaaRelease
+  quality: string // "Excelente" | "Bom" | "Regular"
+  summary: string
+}
+
+export type BotStatus = {
+  aiOnline: boolean
+  aiModel?: string
+  releasesCount: number
+  newReleases: number
+  lastCheck?: string
+  recsAvailable: boolean
+  recsCount: number
+  curatedCount: number
+}
+
+export interface AppSettings {
+  downloadFolder: string
+  defaultMode: string
+  defaultQuality: string
+  autoplayNext: boolean
+  notificationsEnabled: boolean
+  playbackSpeed: number
+}
+
+export interface CalendarDay {
+  day: string
+  entries: CalendarEntry[]
+}
+
+export interface CalendarEntry {
+  title: string
+  imageUrl: string
+  episode: number
+  totalEpisodes: number
+  airingAt: number
+  format: string
+}
+
+export interface SkipTimesResult {
+  opStart: number
+  opEnd: number
+  edStart: number
+  edEnd: number
+  found: boolean
+}
+
+export interface ListEntry {
+  name: string
+  url: string
+  imageUrl: string
+  source: string
+  listName: string
+}
+
+export interface WatchStats {
+  totalAnime: number
+  totalEpisodes: number
+  totalMinutes: number
+  completedAnime: number
+  topGenres: string[]
+  currentStreak: number
+  longestStreak: number
+  recentActivity: ActivityDay[]
+}
+
+export interface ActivityDay {
+  date: string
+  episodes: number
+  minutes: number
+}
+
+export interface QueueEntry {
+  mediaName: string
+  url: string
+  source: string
+  mediaType: string
+  episodeUrl: string
+  episodeNumber: string
+  imageUrl: string
+}
+
+export interface AnimeNote {
+  title: string
+  note: string
+  rating: number
+  updatedAt: string
+}
+
+export interface AniListProfile {
+  id: number
+  name: string
+  avatar: string
+  siteUrl: string
+}
+
+export interface AniListSyncStatus {
+  connected: boolean
+  profile?: AniListProfile
+  lastSync?: string
+  tokenStored: boolean
+}
+
+export interface AnimeLibraryEntry {
+  anilistId: number
+  malId: number
+  title: string
+  titleRomaji: string
+  titleEnglish: string
+  coverImage: string
+  bannerImage: string
+  genres: string[]
+  description: string
+  totalEpisodes: number
+  score: number
+  status: string
+  format: string
+  year: number
+  sources: SourceMapping[]
+  lastUpdated: string
+}
+
+export interface SourceMapping {
+  source: string
+  url: string
+  name: string
+  mediaType: string
+}
+
 type WailsApp = {
   SearchMedia: (query: string, source: string, mediaType: string) => Promise<MediaResult[]>
   GetRelatedAnime: (title: string) => Promise<RelatedAnime[]>
@@ -193,6 +344,40 @@ type WailsApp = {
   RemoveFavorite: (title: string) => Promise<void>
   UpdateWatchProgress: (request: UpdateWatchProgressRequest) => Promise<void>
   DownloadEpisode: (request: DownloadEpisodeRequest) => Promise<DownloadEpisodeResponse>
+  GetBotStatus: () => Promise<BotStatus>
+  GetNyaaReleases: () => Promise<NyaaRelease[]>
+  ClearNewReleases: () => Promise<void>
+  GetAIRecommendations: () => Promise<AIRecommendation[]>
+  RefreshRecommendations: () => Promise<AIRecommendation[]>
+  GetCuratedReleases: () => Promise<CuratedRelease[]>
+  RefreshCuratedReleases: () => Promise<CuratedRelease[]>
+  GetSettings: () => Promise<AppSettings>
+  SaveSettings: (settings: AppSettings) => Promise<void>
+  GetWatchedEpisodes: (groupKey: string) => Promise<number[]>
+  SetEpisodeWatched: (groupKey: string, episodeNum: number, watched: boolean) => Promise<void>
+  SetAllWatchedUpTo: (groupKey: string, upToEpisode: number) => Promise<void>
+  GetSeasonCalendar: () => Promise<CalendarDay[]>
+  GetSkipTimes: (malID: number, episodeNum: number) => Promise<SkipTimesResult>
+  GetCustomLists: () => Promise<Record<string, ListEntry[]>>
+  GetListNames: () => Promise<string[]>
+  AddToList: (listName: string, entry: ListEntry) => Promise<void>
+  RemoveFromList: (listName: string, name: string) => Promise<void>
+  MoveToList: (fromList: string, toList: string, name: string) => Promise<void>
+  GetWatchStats: () => Promise<WatchStats>
+  GetPlayQueue: () => Promise<QueueEntry[]>
+  AddToQueue: (entry: QueueEntry) => Promise<void>
+  RemoveFromQueue: (index: number) => Promise<void>
+  ClearQueue: () => Promise<void>
+  ReorderQueue: (fromIndex: number, toIndex: number) => Promise<void>
+  GetAnimeNote: (title: string) => Promise<AnimeNote | null>
+  SaveAnimeNote: (note: AnimeNote) => Promise<void>
+  GetAllNotes: () => Promise<AnimeNote[]>
+  DeleteAnimeNote: (title: string) => Promise<void>
+  GetAniListSyncStatus: () => Promise<AniListSyncStatus>
+  StartAniListAuth: () => Promise<string>
+  DisconnectAniList: () => Promise<void>
+  SyncToAniList: () => Promise<void>
+  GetAnimeDetails: (anilistId: number) => Promise<AnimeLibraryEntry>
 }
 
 declare global {
@@ -282,4 +467,138 @@ export async function getRelatedAnime(title: string): Promise<RelatedAnime[]> {
   return getApp().GetRelatedAnime(title)
 }
 
+export async function getBotStatus(): Promise<BotStatus> {
+  return getApp().GetBotStatus()
+}
 
+export async function getNyaaReleases(): Promise<NyaaRelease[]> {
+  return getApp().GetNyaaReleases()
+}
+
+export async function clearNewReleases(): Promise<void> {
+  return getApp().ClearNewReleases()
+}
+
+export async function getAIRecommendations(): Promise<AIRecommendation[]> {
+  return getApp().GetAIRecommendations()
+}
+
+export async function refreshRecommendations(): Promise<AIRecommendation[]> {
+  return getApp().RefreshRecommendations()
+}
+
+export async function getCuratedReleases(): Promise<CuratedRelease[]> {
+  return getApp().GetCuratedReleases()
+}
+
+export async function refreshCuratedReleases(): Promise<CuratedRelease[]> {
+  return getApp().RefreshCuratedReleases()
+}
+
+export async function getSettings(): Promise<AppSettings> {
+  return getApp().GetSettings()
+}
+
+export async function saveSettings(settings: AppSettings): Promise<void> {
+  return getApp().SaveSettings(settings)
+}
+
+export async function getWatchedEpisodes(groupKey: string): Promise<number[]> {
+  return getApp().GetWatchedEpisodes(groupKey)
+}
+
+export async function setEpisodeWatched(groupKey: string, episodeNum: number, watched: boolean): Promise<void> {
+  return getApp().SetEpisodeWatched(groupKey, episodeNum, watched)
+}
+
+export async function setAllWatchedUpTo(groupKey: string, upToEpisode: number): Promise<void> {
+  return getApp().SetAllWatchedUpTo(groupKey, upToEpisode)
+}
+
+export async function getSeasonCalendar(): Promise<CalendarDay[]> {
+  return getApp().GetSeasonCalendar()
+}
+
+export async function getSkipTimes(malID: number, episodeNum: number): Promise<SkipTimesResult> {
+  return getApp().GetSkipTimes(malID, episodeNum)
+}
+
+export async function getCustomLists(): Promise<Record<string, ListEntry[]>> {
+  return getApp().GetCustomLists()
+}
+
+export async function getListNames(): Promise<string[]> {
+  return getApp().GetListNames()
+}
+
+export async function addToList(listName: string, entry: ListEntry): Promise<void> {
+  return getApp().AddToList(listName, entry)
+}
+
+export async function removeFromList(listName: string, name: string): Promise<void> {
+  return getApp().RemoveFromList(listName, name)
+}
+
+export async function moveToList(fromList: string, toList: string, name: string): Promise<void> {
+  return getApp().MoveToList(fromList, toList, name)
+}
+
+export async function getWatchStats(): Promise<WatchStats> {
+  return getApp().GetWatchStats()
+}
+
+export async function getPlayQueue(): Promise<QueueEntry[]> {
+  return getApp().GetPlayQueue()
+}
+
+export async function addToQueue(entry: QueueEntry): Promise<void> {
+  return getApp().AddToQueue(entry)
+}
+
+export async function removeFromQueue(index: number): Promise<void> {
+  return getApp().RemoveFromQueue(index)
+}
+
+export async function clearQueue(): Promise<void> {
+  return getApp().ClearQueue()
+}
+
+export async function reorderQueue(fromIndex: number, toIndex: number): Promise<void> {
+  return getApp().ReorderQueue(fromIndex, toIndex)
+}
+
+export async function getAnimeNote(title: string): Promise<AnimeNote | null> {
+  return getApp().GetAnimeNote(title)
+}
+
+export async function saveAnimeNote(note: AnimeNote): Promise<void> {
+  return getApp().SaveAnimeNote(note)
+}
+
+export async function getAllNotes(): Promise<AnimeNote[]> {
+  return getApp().GetAllNotes()
+}
+
+export async function deleteAnimeNote(title: string): Promise<void> {
+  return getApp().DeleteAnimeNote(title)
+}
+
+export async function getAniListSyncStatus(): Promise<AniListSyncStatus> {
+  return getApp().GetAniListSyncStatus()
+}
+
+export async function startAniListAuth(): Promise<string> {
+  return getApp().StartAniListAuth()
+}
+
+export async function disconnectAniList(): Promise<void> {
+  return getApp().DisconnectAniList()
+}
+
+export async function syncToAniList(): Promise<void> {
+  return getApp().SyncToAniList()
+}
+
+export async function getAnimeDetails(anilistId: number): Promise<AnimeLibraryEntry> {
+  return getApp().GetAnimeDetails(anilistId)
+}

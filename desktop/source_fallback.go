@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/alvarorichard/Goanime/internal/api"
@@ -128,8 +129,10 @@ func (a *App) tryGetStream(req StreamRequest) (*StreamResponse, error) {
 
 	var errs []string
 	for _, candidate := range candidates {
+		log.Printf("[stream] trying candidate source=%s url=%s ep=%s", candidate.Source, candidate.URL, req.EpisodeNumber)
 		response, err := a.streamForCandidate(req, candidate)
 		if err != nil {
+			log.Printf("[stream] FAILED source=%s err=%v", candidate.Source, err)
 			recordSourceFailure(groupKey, "watch", candidate.Source, err)
 			errs = append(errs, fmt.Sprintf("%s: %v", candidate.Source, err))
 			continue
@@ -226,6 +229,17 @@ func (a *App) streamForCandidate(req StreamRequest, candidate MediaAlternative) 
 	if err != nil {
 		return nil, err
 	}
+
+	// Handle iframe-only embeds (e.g. Blogger Video): the scraper returns
+	// "iframe:<url>" when the video can only be played inside an iframe.
+	if after, ok := strings.CutPrefix(streamURL, "iframe:"); ok {
+		return &StreamResponse{
+			StreamURL:          after,
+			ContentType:        "iframe",
+			ResolvedEpisodeURL: episode.URL,
+		}, nil
+	}
+
 	return &StreamResponse{
 		StreamURL:          streamURL,
 		ProxyURL:           a.toProxyURL(streamURL),

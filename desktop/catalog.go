@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -15,9 +16,13 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/util"
 )
 
-const anilistEndpoint = "https://graphql.anilist.co"
+const (
+	anilistEndpoint      = "https://graphql.anilist.co"
+	calendarCacheTTL     = 6 * time.Hour
+)
 
 var htmlTagsRe = regexp.MustCompile(`<[^>]+>`)
 
@@ -93,6 +98,15 @@ func (a *App) GetCatalog() []CatalogSection {
 	}
 	a.catalogMu.RUnlock()
 
+	// Double-check after acquiring write lock to prevent duplicate rebuilds
+	a.catalogMu.Lock()
+	if len(a.catalogCache) > 0 && time.Now().Before(a.catalogExpiry) {
+		cached := a.catalogCache
+		a.catalogMu.Unlock()
+		return cached
+	}
+	a.catalogMu.Unlock()
+
 	now := time.Now()
 	season := currentAniListSeason(now.Month())
 	year := now.Year()
@@ -134,16 +148,20 @@ func (a *App) GetCatalog() []CatalogSection {
 			var items []CatalogItem
 			var err error
 			if t.jikanFilter != "" {
-				// Stagger Jikan requests slightly (tasks 3,4,5 → delays 0,400,800ms)
+				// Stagger Jikan requests to respect rate limit (tasks 3,4,5 → delays 0,600,1200ms)
 				jikanIdx := t.idx - 3
 				if jikanIdx > 0 {
-					time.Sleep(time.Duration(jikanIdx) * 400 * time.Millisecond)
+					time.Sleep(time.Duration(jikanIdx) * 600 * time.Millisecond)
 				}
 				items, err = fetchJikanCatalogSection(a.httpClient, t.jikanFilter, 25)
 			} else {
 				items, err = a.fetchCatalogItems(t.sort, t.season, t.year, 20)
 			}
-			if err != nil || len(items) == 0 {
+			if err != nil {
+				log.Printf("catalog task %q failed: %v", t.label, err)
+				return
+			}
+			if len(items) == 0 {
 				return
 			}
 			ch <- indexedResult{t.idx, t.label, items}
@@ -207,6 +225,7 @@ func fetchJikanCatalogSection(client *http.Client, filter string, limit int) ([]
 	}
 	req.Header.Set("Accept", "application/json")
 
+	util.GetJikanLimiter().Wait()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -315,6 +334,7 @@ func (a *App) fetchCatalogItems(sortBy []string, season string, seasonYear int, 
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; GoAnime/1.0)")
 
+	util.GetAniListLimiter().Wait()
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("anilist request failed: %w", err)
@@ -473,6 +493,16 @@ func (a *App) GetCatalogByGenre(genre string) []CatalogSection {
 	}
 	a.genreCacheMu.RUnlock()
 
+	// Double-check after acquiring write lock to prevent duplicate rebuilds
+	a.genreCacheMu.Lock()
+	if cached, ok := a.genreCache[genre]; ok {
+		if exp, ok2 := a.genreCacheTime[genre]; ok2 && time.Now().Before(exp) {
+			a.genreCacheMu.Unlock()
+			return cached
+		}
+	}
+	a.genreCacheMu.Unlock()
+
 	type genreTask struct {
 		idx   int
 		label string
@@ -499,7 +529,11 @@ func (a *App) GetCatalogByGenre(genre string) []CatalogSection {
 		go func(t genreTask) {
 			defer wg.Done()
 			items, err := a.fetchCatalogItemsByGenre(t.sort, genre, 25)
-			if err != nil || len(items) == 0 {
+			if err != nil {
+				log.Printf("catalog genre task %q failed: %v", t.label, err)
+				return
+			}
+			if len(items) == 0 {
 				return
 			}
 			ch <- indexedResult{t.idx, t.label, items}
@@ -559,6 +593,7 @@ func (a *App) fetchCatalogItemsByGenre(sortBy []string, genre string, perPage in
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; GoAnime/1.0)")
 
+	util.GetAniListLimiter().Wait()
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("anilist genre request failed: %w", err)
@@ -603,4 +638,189 @@ func (a *App) fetchCatalogItemsByGenre(sortBy []string, genre string, perPage in
 		})
 	}
 	return items, nil
+}
+
+const airingScheduleQuery = `
+query ($start: Int, $end: Int) {
+  Page(perPage: 50) {
+    airingSchedules(airingAt_greater: $start, airingAt_lesser: $end, sort: TIME) {
+      airingAt
+      episode
+      media {
+        id
+        title { romaji english native }
+        coverImage { large }
+        episodes
+        format
+        status
+      }
+    }
+  }
+}
+`
+
+type airingScheduleResp struct {
+	Data struct {
+		Page struct {
+			AiringSchedules []struct {
+				AiringAt int64 `json:"airingAt"`
+				Episode  int   `json:"episode"`
+				Media    struct {
+					ID    int `json:"id"`
+					Title struct {
+						Romaji  string `json:"romaji"`
+						English string `json:"english"`
+						Native  string `json:"native"`
+					} `json:"title"`
+					CoverImage struct {
+						Large string `json:"large"`
+					} `json:"coverImage"`
+					Episodes int    `json:"episodes"`
+					Format   string `json:"format"`
+					Status   string `json:"status"`
+				} `json:"media"`
+			} `json:"airingSchedules"`
+		} `json:"Page"`
+	} `json:"data"`
+}
+
+var weekdayNamesPTBR = [7]string{
+	"Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado",
+}
+
+// GetSeasonCalendar returns the airing schedule for the current week, grouped by day.
+func (a *App) GetSeasonCalendar() []CalendarDay {
+	a.calendarMu.RLock()
+	if len(a.calendarCache) > 0 && time.Now().Before(a.calendarExpiry) {
+		cached := a.calendarCache
+		a.calendarMu.RUnlock()
+		return cached
+	}
+	a.calendarMu.RUnlock()
+
+	// Double-check after acquiring write lock
+	a.calendarMu.Lock()
+	if len(a.calendarCache) > 0 && time.Now().Before(a.calendarExpiry) {
+		cached := a.calendarCache
+		a.calendarMu.Unlock()
+		return cached
+	}
+	a.calendarMu.Unlock()
+
+	now := time.Now()
+	// Find Monday of the current week
+	weekday := now.Weekday()
+	offset := int(weekday) - int(time.Monday)
+	if offset < 0 {
+		offset += 7
+	}
+	monday := time.Date(now.Year(), now.Month(), now.Day()-offset, 0, 0, 0, 0, now.Location())
+	sunday := monday.AddDate(0, 0, 7).Add(-time.Second)
+
+	startEpoch := monday.Unix()
+	endEpoch := sunday.Unix()
+
+	vars := map[string]interface{}{
+		"start": startEpoch,
+		"end":   endEpoch,
+	}
+
+	body, err := json.Marshal(map[string]interface{}{
+		"query":     airingScheduleQuery,
+		"variables": vars,
+	})
+	if err != nil {
+		log.Printf("calendar: marshal error: %v", err)
+		return []CalendarDay{}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, anilistEndpoint, bytes.NewReader(body))
+	if err != nil {
+		log.Printf("calendar: request error: %v", err)
+		return []CalendarDay{}
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; GoAnime/1.0)")
+
+	util.GetAniListLimiter().Wait()
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		log.Printf("calendar: fetch error: %v", err)
+		return []CalendarDay{}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("calendar: anilist returned status %d", resp.StatusCode)
+		return []CalendarDay{}
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("calendar: read error: %v", err)
+		return []CalendarDay{}
+	}
+
+	var page airingScheduleResp
+	if err := json.Unmarshal(data, &page); err != nil {
+		log.Printf("calendar: parse error: %v", err)
+		return []CalendarDay{}
+	}
+
+	// Group by day of week
+	dayMap := make(map[int][]CalendarEntry) // key = Weekday int (0=Sun..6=Sat)
+	seen := make(map[int]bool)              // deduplicate by media ID per day
+	for _, sched := range page.Data.Page.AiringSchedules {
+		t := time.Unix(sched.AiringAt, 0).In(now.Location())
+		dayIdx := int(t.Weekday())
+
+		mediaID := sched.Media.ID
+		dedupeKey := dayIdx*100000 + mediaID
+		if seen[dedupeKey] {
+			continue
+		}
+		seen[dedupeKey] = true
+
+		title := sched.Media.Title.English
+		if title == "" {
+			title = sched.Media.Title.Romaji
+		}
+		if title == "" {
+			title = sched.Media.Title.Native
+		}
+
+		dayMap[dayIdx] = append(dayMap[dayIdx], CalendarEntry{
+			Title:         title,
+			ImageURL:      sched.Media.CoverImage.Large,
+			Episode:       sched.Episode,
+			TotalEpisodes: sched.Media.Episodes,
+			AiringAt:      sched.AiringAt,
+			Format:        sched.Media.Format,
+		})
+	}
+
+	// Build ordered result starting from Monday
+	dayOrder := []int{1, 2, 3, 4, 5, 6, 0} // Mon, Tue, Wed, Thu, Fri, Sat, Sun
+	var days []CalendarDay
+	for _, d := range dayOrder {
+		entries, ok := dayMap[d]
+		if !ok || len(entries) == 0 {
+			continue
+		}
+		days = append(days, CalendarDay{
+			Day:     weekdayNamesPTBR[d],
+			Entries: entries,
+		})
+	}
+
+	a.calendarMu.Lock()
+	a.calendarCache = days
+	a.calendarExpiry = time.Now().Add(calendarCacheTTL)
+	a.calendarMu.Unlock()
+
+	return days
 }

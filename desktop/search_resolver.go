@@ -18,6 +18,21 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/util"
+)
+
+// Pre-compiled regexes for hot-path functions
+var (
+	reNonAlphanumSpace = regexp.MustCompile(`[^\p{L}\p{N}\s]+`)
+	reMultipleSpaces   = regexp.MustCompile(`\s+`)
+	reColonSuffix      = regexp.MustCompile(`:\s*.+$`)
+	reRomanSuffix      = regexp.MustCompile(`\s+(?:II|III|IV|V|VI|VII|VIII|IX|X)\s*$`)
+	reSeasonNumSuffix  = regexp.MustCompile(`\s+\d+\s*$`)
+	reSeasonWordSuffix = regexp.MustCompile(`(?i)\s+(?:season|temporada)\s*\d+\s*$`)
+	rePartSuffix       = regexp.MustCompile(`(?i)\s+(?:part|parte)\s*\d+\s*$`)
+	reSeasonExtract    = regexp.MustCompile(`(?i)(?:season|temporada|part|parte)\s*(\d+)`)
+	reSeasonOrdinal    = regexp.MustCompile(`(?i)(\d+)(?:st|nd|rd|th)\s+season`)
+	reRomanExtract     = regexp.MustCompile(`\b(II|III|IV|V|VI|VII|VIII|IX|X)\b\s*$`)
 )
 
 type animeSearchContext struct {
@@ -83,29 +98,55 @@ func (a *App) searchAnimeResolved(query string, sourceType *scraper.ScraperType)
 	ctx := a.resolveAnimeSearchContext(query)
 	searchTerms := append([]string(nil), ctx.Aliases...)
 	searchTerms = mergeSearchTerms(searchTerms, ctx.RelatedTitles)
-	// Limit search terms to avoid excessively long sequential searches
-	if len(searchTerms) > 10 {
-		searchTerms = searchTerms[:10]
+	// Limit search terms — with PT-BR-only providers, fewer terms suffice
+	if len(searchTerms) > 6 {
+		searchTerms = searchTerms[:6]
 	}
 
 	seen := make(map[string]bool)
 	var seenMu sync.Mutex
 	results := make([]*models.Anime, 0, maxSearchItems)
-	var searchErrors []string
-	deadline := time.Now().Add(18 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
+
+	type batchResult struct {
+		items []*models.Anime
+		err   error
+	}
+
+	// Run up to 3 search terms concurrently for speed
+	const maxConcurrent = 3
+	sem := make(chan struct{}, maxConcurrent)
+	batchCh := make(chan batchResult, len(searchTerms))
+	var searchWg sync.WaitGroup
 
 	for _, term := range searchTerms {
-		if time.Now().After(deadline) || len(results) >= maxSearchItems {
+		if time.Now().After(deadline) {
 			break
 		}
-		batch, err := a.manager.SearchAnime(term, sourceType)
-		if err != nil {
-			searchErrors = append(searchErrors, err.Error())
+		searchWg.Add(1)
+		go func(term string) {
+			defer searchWg.Done()
+			sem <- struct{}{}        // acquire
+			defer func() { <-sem }() // release
+			batch, err := a.manager.SearchAnime(term, sourceType)
+			batchCh <- batchResult{batch, err}
+		}(term)
+	}
+
+	go func() {
+		searchWg.Wait()
+		close(batchCh)
+	}()
+
+	var searchErrors []string
+	for br := range batchCh {
+		if br.err != nil {
+			searchErrors = append(searchErrors, br.err.Error())
 			continue
 		}
-
 		seenMu.Lock()
-		for _, item := range batch {
+		var newItems []*models.Anime
+		for _, item := range br.items {
 			if item == nil {
 				continue
 			}
@@ -115,23 +156,34 @@ func (a *App) searchAnimeResolved(query string, sourceType *scraper.ScraperType)
 			}
 			seen[key] = true
 			results = append(results, item)
-			if len(results) >= maxSearchItems {
-				break
-			}
+			newItems = append(newItems, item)
 		}
 		seenMu.Unlock()
 
-		if len(results) >= maxSearchItems {
-			break
+		// Emit partial results for immediate display
+		if len(newItems) > 0 {
+			partialOut := make([]MediaResult, 0, len(newItems))
+			for _, item := range newItems {
+				partialOut = append(partialOut, MediaResult{
+					Name:      item.Name,
+					URL:       item.URL,
+					ImageURL:  item.ImageURL,
+					Source:    item.Source,
+					MediaType: normalizeMediaType(item),
+					Year:      item.Year,
+				})
+			}
+			a.emitPartialSearchResults(partialOut)
 		}
 	}
 
-	// If no specific source was requested, remove FlixHQ results: it is a
-	// movie/TV source and anime-resolved searches should never include it.
+	// If no specific source was requested, remove English-only sources
+	// (AllAnime, FlixHQ). Keep only PT-BR providers.
 	if sourceType == nil {
 		filtered := results[:0]
 		for _, r := range results {
-			if !strings.EqualFold(r.Source, "flixhq") {
+			src := strings.ToLower(strings.TrimSpace(r.Source))
+			if src != "flixhq" && src != "allanime" {
 				filtered = append(filtered, r)
 			}
 		}
@@ -315,6 +367,7 @@ func fetchAniListSearchMetadata(client *http.Client, searchTerms []string) *aniL
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json")
 
+		util.GetAniListLimiter().Wait()
 		resp, err := client.Do(req)
 		if err != nil {
 			cancel()
@@ -349,6 +402,7 @@ func fetchJikanSearchMetadata(client *http.Client, query string) *jikanSearchEnv
 	}
 	req.Header.Set("Accept", "application/json")
 
+	util.GetJikanLimiter().Wait()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil
@@ -452,26 +506,21 @@ func expandAnimeSearchTerm(term string) []string {
 	}
 
 	variants := []string{term}
-	colonRE := regexp.MustCompile(`:\s*.+$`)
-	romanRE := regexp.MustCompile(`\s+(?:II|III|IV|V|VI|VII|VIII|IX|X)\s*$`)
-	seasonNumRE := regexp.MustCompile(`\s+\d+\s*$`)
-	seasonWordRE := regexp.MustCompile(`(?i)\s+(?:season|temporada)\s*\d+\s*$`)
-	partRE := regexp.MustCompile(`(?i)\s+(?:part|parte)\s*\d+\s*$`)
 
-	if colonRE.MatchString(term) {
-		variants = append(variants, strings.TrimSpace(colonRE.ReplaceAllString(term, "")))
+	if reColonSuffix.MatchString(term) {
+		variants = append(variants, strings.TrimSpace(reColonSuffix.ReplaceAllString(term, "")))
 	}
-	if romanRE.MatchString(term) {
-		variants = append(variants, strings.TrimSpace(romanRE.ReplaceAllString(term, "")))
+	if reRomanSuffix.MatchString(term) {
+		variants = append(variants, strings.TrimSpace(reRomanSuffix.ReplaceAllString(term, "")))
 	}
-	if seasonWordRE.MatchString(term) {
-		variants = append(variants, strings.TrimSpace(seasonWordRE.ReplaceAllString(term, "")))
+	if reSeasonWordSuffix.MatchString(term) {
+		variants = append(variants, strings.TrimSpace(reSeasonWordSuffix.ReplaceAllString(term, "")))
 	}
-	if partRE.MatchString(term) {
-		variants = append(variants, strings.TrimSpace(partRE.ReplaceAllString(term, "")))
+	if rePartSuffix.MatchString(term) {
+		variants = append(variants, strings.TrimSpace(rePartSuffix.ReplaceAllString(term, "")))
 	}
-	if seasonNumRE.MatchString(term) {
-		variants = append(variants, strings.TrimSpace(seasonNumRE.ReplaceAllString(term, "")))
+	if reSeasonNumSuffix.MatchString(term) {
+		variants = append(variants, strings.TrimSpace(reSeasonNumSuffix.ReplaceAllString(term, "")))
 	}
 	if strings.Contains(strings.ToLower(term), " no ") {
 		variants = append(variants, strings.ReplaceAll(term, " no ", " "))
@@ -587,7 +636,7 @@ func buildAnimeDisplayResults(items []*models.Anime, ctx *animeSearchContext) []
 		if item == nil {
 			continue
 		}
-		key, title, season := deriveAnimeGroupInfo(item, ctx)
+		key, title, season := deriveAnimeGroupInfo(item, ctx, 0)
 		group := groups[key]
 		if group == nil {
 			group = &animeGroup{key: key, title: title, season: season, available: make(map[string]bool)}
@@ -694,7 +743,7 @@ func buildAnimeSourceResults(items []*models.Anime, ctx *animeSearchContext) []M
 		if item == nil {
 			continue
 		}
-		key, title, season := deriveAnimeGroupInfo(item, ctx)
+		key, title, season := deriveAnimeGroupInfo(item, ctx, 0)
 		group := groups[key]
 		if group == nil {
 			group = &animeGroup{key: key, title: title, season: season, available: make(map[string]bool)}
@@ -806,7 +855,7 @@ func mediaResultPriority(item MediaResult) int {
 	return base
 }
 
-func deriveAnimeGroupInfo(item *models.Anime, ctx *animeSearchContext) (string, string, int) {
+func deriveAnimeGroupInfo(item *models.Anime, ctx *animeSearchContext, anilistID int) (string, string, int) {
 	cleaned := cleanDisplayName(item.Name)
 	season := extractSeasonNumber(cleaned)
 	if season == 0 {
@@ -825,6 +874,17 @@ func deriveAnimeGroupInfo(item *models.Anime, ctx *animeSearchContext) (string, 
 	if bestAlias == "" {
 		bestAlias = cleaned
 	}
+
+	// If AniList ID is available and the item matches the search context
+	// (high similarity), use the AniList ID as the primary group key.
+	if anilistID > 0 && bestScore >= 600 {
+		key := fmt.Sprintf("al:%d", anilistID)
+		if season > 0 {
+			key = fmt.Sprintf("%s#s%d", key, season)
+		}
+		return key, bestAlias, season
+	}
+
 	key := normalizeSearchText(bestAlias)
 	if season > 0 {
 		key = fmt.Sprintf("%s#s%d", key, season)
@@ -1057,18 +1117,14 @@ func isRelevantRelationType(value string) bool {
 
 func extractSeasonNumber(value string) int {
 	value = strings.TrimSpace(value)
-	patterns := []*regexp.Regexp{
-		regexp.MustCompile(`(?i)(?:season|temporada|part|parte)\s*(\d+)`),
-		regexp.MustCompile(`(?i)(\d+)(?:st|nd|rd|th)\s+season`),
-	}
-	for _, pattern := range patterns {
+	for _, pattern := range []*regexp.Regexp{reSeasonExtract, reSeasonOrdinal} {
 		if match := pattern.FindStringSubmatch(value); len(match) > 1 {
 			if n, err := strconv.Atoi(match[1]); err == nil && n > 0 {
 				return n
 			}
 		}
 	}
-	roman := regexp.MustCompile(`\b(II|III|IV|V|VI|VII|VIII|IX|X)\b\s*$`).FindStringSubmatch(strings.ToUpper(value))
+	roman := reRomanExtract.FindStringSubmatch(strings.ToUpper(value))
 	if len(roman) > 1 {
 		return romanToInt(roman[1])
 	}
@@ -1141,8 +1197,8 @@ func wordOverlapScore(a string, b string) int {
 
 func normalizeSearchText(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
-	value = regexp.MustCompile(`[^\p{L}\p{N}\s]+`).ReplaceAllString(value, " ")
-	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, " ")
+	value = reNonAlphanumSpace.ReplaceAllString(value, " ")
+	value = reMultipleSpaces.ReplaceAllString(value, " ")
 	return strings.TrimSpace(value)
 }
 
@@ -1157,4 +1213,181 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// buildAnimeDisplayResultsWithLibrary is like buildAnimeDisplayResults but
+// uses the AniList ID from the search context to group results and registers
+// discovered sources in the anime library. If AniListID is 0, it falls back
+// to the standard title-based grouping.
+func (a *App) buildAnimeDisplayResultsWithLibrary(items []*models.Anime, ctx *animeSearchContext) []MediaResult {
+	if len(items) == 0 {
+		return nil
+	}
+
+	anilistID := 0
+	malID := 0
+	if ctx != nil {
+		ctx.mu.Lock()
+		anilistID = ctx.AniListID
+		malID = ctx.MalID
+		ctx.mu.Unlock()
+	}
+
+	type animeGroup struct {
+		key       string
+		title     string
+		season    int
+		variants  []MediaAlternative
+		represent *models.Anime
+		bestScore int
+		available map[string]bool
+	}
+
+	groups := make(map[string]*animeGroup)
+	orderedKeys := make([]string, 0)
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		key, title, season := deriveAnimeGroupInfo(item, ctx, anilistID)
+		group := groups[key]
+		if group == nil {
+			group = &animeGroup{key: key, title: title, season: season, available: make(map[string]bool)}
+			groups[key] = group
+			orderedKeys = append(orderedKeys, key)
+		}
+		candidate := mediaAlternativeFromAnime(item)
+		candidate.MediaType = normalizeMediaType(item)
+		candidate.Name = cleanDisplayName(candidate.Name)
+		group.variants = appendUniqueAlternative(group.variants, candidate)
+		group.available[strings.TrimSpace(candidate.Source)] = true
+		score := animeMatchScore(item, ctx)
+		if group.represent == nil || score > group.bestScore {
+			group.represent = item
+			group.bestScore = score
+		}
+	}
+
+	// Register discovered sources in the library for AniList-keyed groups
+	if a.library != nil && anilistID > 0 {
+		for _, key := range orderedKeys {
+			if !strings.HasPrefix(key, "al:") {
+				continue
+			}
+			group := groups[key]
+			if group == nil {
+				continue
+			}
+			for _, alt := range group.variants {
+				a.library.addSourceMapping(anilistID, SourceMapping{
+					Source:    alt.Source,
+					URL:       alt.URL,
+					Name:      alt.Name,
+					MediaType: alt.MediaType,
+				})
+			}
+		}
+		go a.library.saveLibrary()
+	}
+
+	out := make([]MediaResult, 0, len(groups))
+	for _, key := range orderedKeys {
+		group := groups[key]
+		if group == nil || len(group.variants) == 0 || group.represent == nil {
+			continue
+		}
+		watchAlt := pickBestAlternative(group.variants, group.key, "watch")
+		downloadAlt := pickBestAlternative(group.variants, group.key, "download")
+		dubAlt := pickBestAlternative(group.variants, group.key, "dub")
+		subAlt := pickBestAlternative(group.variants, group.key, "sub")
+		availableSources := make([]string, 0, len(group.available))
+		for source := range group.available {
+			availableSources = append(availableSources, source)
+		}
+		sort.Strings(availableSources)
+
+		represent := group.represent
+		hasPortuguese, hasEnglish, hasDub, hasSub := summarizeAlternativeLanguages(group.variants)
+		watchHasPortuguese, watchHasEnglish, watchHasDub, watchHasSub := detectAlternativeLanguage(watchAlt)
+
+		result := MediaResult{
+			Name:               cleanDisplayName(watchAlt.Name),
+			URL:                watchAlt.URL,
+			ImageURL:           represent.ImageURL,
+			Source:             watchAlt.Source,
+			MediaType:          normalizeMediaType(represent),
+			Year:               represent.Year,
+			Score:              float64(represent.Details.AverageScore) / 10,
+			Description:        strings.TrimSpace(represent.Details.Description),
+			Genres:             append([]string(nil), represent.Details.Genres...),
+			CanonicalTitle:     chooseCanonicalGroupTitle(group.title, ctx),
+			GroupKey:           group.key,
+			SeasonNumber:       group.season,
+			AvailableSources:   availableSources,
+			WatchSource:        watchAlt.Source,
+			DownloadSource:     downloadAlt.Source,
+			DubSource:          dubAlt.Source,
+			SubSource:          subAlt.Source,
+			Alternatives:       group.variants,
+			HasPortuguese:      hasPortuguese,
+			HasEnglish:         hasEnglish,
+			HasDub:             hasDub,
+			HasSub:             hasSub,
+			WatchHasPortuguese: watchHasPortuguese,
+			WatchHasEnglish:    watchHasEnglish,
+			WatchHasDub:        watchHasDub,
+			WatchHasSub:        watchHasSub,
+		}
+
+		// Enrich with AniList metadata if this group is keyed by AniList ID
+		if strings.HasPrefix(key, "al:") && anilistID > 0 {
+			result.AniListID = anilistID
+			result.MalID = malID
+
+			// Populate from search context metadata
+			if ctx != nil {
+				if result.CanonicalTitle == "" {
+					result.CanonicalTitle = ctx.CanonicalTitle
+				}
+			}
+
+			// Enrich from library if available
+			if a.library != nil {
+				entry := a.library.getEntry(anilistID)
+				if entry != nil {
+					if result.ImageURL == "" && entry.CoverImage != "" {
+						result.ImageURL = entry.CoverImage
+					}
+					if result.Description == "" && entry.Description != "" {
+						result.Description = entry.Description
+					}
+					if len(result.Genres) == 0 && len(entry.Genres) > 0 {
+						result.Genres = append([]string(nil), entry.Genres...)
+					}
+					if result.TotalEpisodes == 0 && entry.TotalEpisodes > 0 {
+						result.TotalEpisodes = entry.TotalEpisodes
+					}
+					if result.Score == 0 && entry.Score > 0 {
+						result.Score = entry.Score
+					}
+				}
+			}
+		}
+
+		out = append(out, result)
+	}
+
+	sort.SliceStable(out, func(i, j int) bool {
+		left := mediaResultPriority(out[i])
+		right := mediaResultPriority(out[j])
+		if left != right {
+			return left > right
+		}
+		return strings.ToLower(out[i].CanonicalTitle) < strings.ToLower(out[j].CanonicalTitle)
+	})
+
+	if len(out) > maxSearchItems {
+		out = out[:maxSearchItems]
+	}
+	return out
 }

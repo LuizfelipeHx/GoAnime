@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alvarorichard/Goanime/internal/ai"
+	api "github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/scraper"
@@ -54,6 +56,38 @@ type App struct {
 	movieCatalogMu     sync.RWMutex
 	movieCatalogCache  []CatalogSection
 	movieCatalogExpiry time.Time
+
+	calendarMu     sync.RWMutex
+	calendarCache  []CalendarDay
+	calendarExpiry time.Time
+
+	settings   AppSettings
+	settingsMu sync.RWMutex
+
+	watchedMarks map[string][]int
+	watchedMu    sync.RWMutex
+
+	// Custom lists
+	customLists   customListsData
+	customListsMu sync.RWMutex
+
+	// Play queue (in-memory only)
+	playQueue   []QueueEntry
+	playQueueMu sync.RWMutex
+
+	// Anime notes
+	notes   map[string]AnimeNote
+	notesMu sync.RWMutex
+
+	// Anime library (AniList-based identity)
+	library *animeLibrary
+
+	// Bot system
+	aiClient  *ai.Client
+	relBot    *releasesBot
+	recBot    *recommenderBot
+	curBot    *curatorBot
+	botCancel context.CancelFunc
 }
 
 func NewApp() *App {
@@ -73,6 +107,38 @@ func (a *App) startup(ctx context.Context) {
 			a.tracker = t
 		}
 	}
+
+	// Load user settings, watched marks, custom lists, notes, and anime library
+	a.loadSettings()
+	a.loadWatchedMarks()
+	a.loadCustomLists()
+	a.loadNotes()
+	a.library = newAnimeLibrary()
+	a.library.loadLibrary()
+
+	// Initialize bot system
+	a.aiClient = ai.NewClient()
+	a.relBot = newReleasesBot(ctx)
+	a.relBot.notifyFn = func(title, body string) {
+		if a.GetSettings().NotificationsEnabled {
+			a.SendDesktopNotification(title, body)
+		}
+	}
+	a.recBot = newRecommenderBot(a.aiClient, a.GetWatchProgress)
+	a.curBot = newCuratorBot(a.aiClient, a.relBot)
+
+	// Start background bots
+	botCtx, botCancel := context.WithCancel(context.Background())
+	a.botCancel = botCancel
+	a.relBot.start()
+
+	// Refresh AI bots in background (non-blocking)
+	go func() {
+		// Small delay to let the app start
+		time.Sleep(5 * time.Second)
+		a.recBot.refresh(botCtx)
+		a.curBot.refresh(botCtx)
+	}()
 }
 
 func desktopTrackerPath() string {
@@ -209,6 +275,14 @@ func (a *App) DownloadEpisode(req DownloadEpisodeRequest) (*DownloadEpisodeRespo
 }
 
 func (a *App) shutdown(_ context.Context) {
+	// Stop bots
+	if a.botCancel != nil {
+		a.botCancel()
+	}
+	if a.relBot != nil {
+		a.relBot.stop()
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -238,6 +312,94 @@ func (a *App) GetSearchHistory() []HistoryEntry {
 	return entries
 }
 
+// GetBotStatus returns the current status of all bots.
+func (a *App) GetBotStatus() BotStatus {
+	status := BotStatus{}
+
+	if a.aiClient != nil {
+		status.AIOnline = a.aiClient.IsAvailable()
+		if status.AIOnline {
+			status.AIModel = a.aiClient.ModelName()
+		}
+	}
+
+	if a.relBot != nil {
+		releases := a.relBot.getReleases()
+		status.ReleasesCount = len(releases)
+		status.NewReleases = a.relBot.getNewCount()
+		a.relBot.mu.RLock()
+		if !a.relBot.lastCheck.IsZero() {
+			status.LastCheck = a.relBot.lastCheck.Format(time.RFC3339)
+		}
+		a.relBot.mu.RUnlock()
+	}
+
+	if a.recBot != nil {
+		recs := a.recBot.getRecs()
+		status.RecsAvailable = a.recBot.isAvailable()
+		status.RecsCount = len(recs)
+	}
+
+	if a.curBot != nil {
+		status.CuratedCount = len(a.curBot.getCurated())
+	}
+
+	return status
+}
+
+// GetNyaaReleases returns the latest PT-BR releases from Nyaa.
+func (a *App) GetNyaaReleases() []NyaaRelease {
+	if a.relBot == nil {
+		return []NyaaRelease{}
+	}
+	return a.relBot.getReleases()
+}
+
+// ClearNewReleases resets the new releases counter.
+func (a *App) ClearNewReleases() {
+	if a.relBot != nil {
+		a.relBot.clearNewCount()
+	}
+}
+
+// GetAIRecommendations returns personalized anime recommendations.
+func (a *App) GetAIRecommendations() []AIRecommendation {
+	if a.recBot == nil {
+		return []AIRecommendation{}
+	}
+	return a.recBot.getRecs()
+}
+
+// RefreshRecommendations forces a refresh of AI recommendations.
+func (a *App) RefreshRecommendations() []AIRecommendation {
+	if a.recBot == nil || a.aiClient == nil {
+		return []AIRecommendation{}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	a.recBot.refresh(ctx)
+	return a.recBot.getRecs()
+}
+
+// GetCuratedReleases returns AI-curated PT-BR releases.
+func (a *App) GetCuratedReleases() []CuratedRelease {
+	if a.curBot == nil {
+		return []CuratedRelease{}
+	}
+	return a.curBot.getCurated()
+}
+
+// RefreshCuratedReleases forces a refresh of curated releases.
+func (a *App) RefreshCuratedReleases() []CuratedRelease {
+	if a.curBot == nil || a.aiClient == nil {
+		return []CuratedRelease{}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	a.curBot.refresh(ctx)
+	return a.curBot.getCurated()
+}
+
 func (a *App) SearchMedia(query string, source string, mediaType string) ([]MediaResult, error) {
 	query = strings.TrimSpace(query)
 	if len(query) < 2 {
@@ -252,52 +414,62 @@ func (a *App) SearchMedia(query string, source string, mediaType string) ([]Medi
 		return nil, fmt.Errorf("%s", sourceErr)
 	}
 
-	var (
-		results   []*models.Anime
-		searchCtx *animeSearchContext
-		err       error
-	)
-
-	if mediaTypeValue == "" || mediaTypeValue == "anime" || mediaTypeValue == "all" {
-		results, searchCtx, err = a.searchAnimeResolved(query, sourceType)
-	} else {
-		results, err = a.manager.SearchAnime(query, sourceType)
-	}
+	// ── Fast direct search (like the terminal version) ──
+	// Search scrapers directly with the user's query — no AniList/Jikan
+	// pre-resolution. This makes search nearly instant.
+	results, err := a.manager.SearchAnime(query, sourceType)
 	if err != nil {
 		return nil, err
 	}
 
-	filtered := filterByType(results, mediaTypeValue)
-	var out []MediaResult
-	if searchCtx != nil && (mediaTypeValue == "" || mediaTypeValue == "anime" || mediaTypeValue == "all") {
-		out = buildAnimeSourceResults(filtered, searchCtx)
-	} else {
-		sort.Slice(filtered, func(i, j int) bool {
-			if filtered[i].Source == filtered[j].Source {
-				return strings.ToLower(filtered[i].Name) < strings.ToLower(filtered[j].Name)
+	// Filter out English-only sources when no specific source was chosen
+	if sourceType == nil {
+		filtered := results[:0]
+		for _, r := range results {
+			src := strings.ToLower(strings.TrimSpace(r.Source))
+			if src != "flixhq" && src != "allanime" {
+				filtered = append(filtered, r)
 			}
-			return strings.ToLower(filtered[i].Source) < strings.ToLower(filtered[j].Source)
-		})
-		out = make([]MediaResult, 0, min(len(filtered), maxSearchItems))
-		for _, item := range filtered {
-			if len(out) >= maxSearchItems {
-				break
-			}
-			out = append(out, MediaResult{
-				Name:      item.Name,
-				URL:       item.URL,
-				ImageURL:  item.ImageURL,
-				Source:    item.Source,
-				MediaType: normalizeMediaType(item),
-				Year:      item.Year,
-			})
 		}
+		results = filtered
 	}
 
-	pending := append([]MediaResult(nil), out...)
-	go a.emitSearchCoverUpdates(query, sourceValue, mediaTypeValue, pending)
+	filtered := filterByType(results, mediaTypeValue)
+
+	// Deduplicate by source+URL
+	seen := make(map[string]bool, len(filtered))
+	out := make([]MediaResult, 0, min(len(filtered), maxSearchItems))
+	for _, item := range filtered {
+		if item == nil {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(item.Source)) + "|" + strings.TrimSpace(item.URL)
+		if key == "|" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		if len(out) >= maxSearchItems {
+			break
+		}
+		out = append(out, MediaResult{
+			Name:      cleanDisplayName(item.Name),
+			URL:       item.URL,
+			ImageURL:  item.ImageURL,
+			Source:    item.Source,
+			MediaType: normalizeMediaType(item),
+			Year:      item.Year,
+			Score:     item.Rating,
+		})
+	}
 
 	return out, nil
+}
+
+func (a *App) emitPartialSearchResults(results []MediaResult) {
+	if len(results) == 0 {
+		return
+	}
+	wailsruntime.EventsEmit(a.ctx, "search:partial", results)
 }
 
 func fetchAniListCovers(client *http.Client, query string) map[string]string {
@@ -345,6 +517,7 @@ query ($search: String) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
+	util.GetAniListLimiter().Wait()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil
@@ -408,6 +581,7 @@ func fetchJikanMeta(client *http.Client, query string) map[string]jikanMeta {
 	}
 	req.Header.Set("Accept", "application/json")
 
+	util.GetJikanLimiter().Wait()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil
@@ -510,6 +684,7 @@ func jikanSearchMALID(client *http.Client, query string) int {
 	}
 	req.Header.Set("Accept", "application/json")
 
+	util.GetJikanLimiter().Wait()
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0
@@ -546,6 +721,7 @@ func jikanFetchRelations(client *http.Client, malID int) []RelatedAnime {
 	}
 	req.Header.Set("Accept", "application/json")
 
+	util.GetJikanLimiter().Wait()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil
@@ -607,6 +783,7 @@ func jikanFetchAnimeImage(client *http.Client, malID int) string {
 	}
 	req.Header.Set("Accept", "application/json")
 
+	util.GetJikanLimiter().Wait()
 	resp, err := client.Do(req)
 	if err != nil {
 		return ""
@@ -662,19 +839,32 @@ func (a *App) GetRelatedAnime(title string) []RelatedAnime {
 		url   string
 	}
 	ch := make(chan imageResult, len(relations))
+	var imgWg sync.WaitGroup
 	for i, rel := range relations {
 		i, rel := i, rel
+		imgWg.Add(1)
 		go func() {
+			defer imgWg.Done()
 			time.Sleep(time.Duration(i) * 400 * time.Millisecond)
 			ch <- imageResult{i, jikanFetchAnimeImage(a.httpClient, rel.MalID)}
 		}()
 	}
 
+	// Close channel once all goroutines complete
+	go func() {
+		imgWg.Wait()
+		close(ch)
+	}()
+
 	deadline := time.After(8 * time.Second)
 	received := 0
 	for received < len(relations) {
 		select {
-		case r := <-ch:
+		case r, ok := <-ch:
+			if !ok {
+				received = len(relations)
+				break
+			}
 			relations[r.index].ImageURL = r.url
 			received++
 		case <-deadline:
@@ -685,7 +875,32 @@ func (a *App) GetRelatedAnime(title string) []RelatedAnime {
 	return relations
 }
 
-func (a *App) emitSearchCoverUpdates(query string, source string, mediaType string, results []MediaResult) {
+// GetSkipTimes returns opening and ending skip timestamps for an episode.
+func (a *App) GetSkipTimes(malID int, episodeNum int) (*SkipTimesResult, error) {
+	if malID <= 0 || episodeNum <= 0 {
+		return &SkipTimesResult{Found: false}, nil
+	}
+
+	ep := &models.Episode{}
+	err := api.GetAndParseAniSkipData(malID, episodeNum, ep)
+	if err != nil {
+		// Not found is not a hard error for the frontend
+		return &SkipTimesResult{Found: false}, nil
+	}
+
+	return &SkipTimesResult{
+		OpStart: float64(ep.SkipTimes.Op.Start),
+		OpEnd:   float64(ep.SkipTimes.Op.End),
+		EdStart: float64(ep.SkipTimes.Ed.Start),
+		EdEnd:   float64(ep.SkipTimes.Ed.End),
+		Found:   ep.SkipTimes.Op.End > 0 || ep.SkipTimes.Ed.End > 0,
+	}, nil
+}
+
+func (a *App) emitSearchCoverUpdates(ctx context.Context, query string, source string, mediaType string, results []MediaResult) {
+	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+
 	type anilistDone struct{ covers map[string]string }
 	type jikanDone struct{ meta map[string]jikanMeta }
 
@@ -695,14 +910,22 @@ func (a *App) emitSearchCoverUpdates(query string, source string, mediaType stri
 	go func() { anilistCh <- anilistDone{fetchAniListCovers(a.httpClient, query)} }()
 	go func() { jikanCh <- jikanDone{fetchJikanMeta(a.httpClient, query)} }()
 
-	al := <-anilistCh
-	jk := <-jikanCh
-
-	if len(al.covers) > 0 {
-		applyAniListCovers(results, al.covers)
+	select {
+	case <-ctx.Done():
+		return
+	case al := <-anilistCh:
+		if len(al.covers) > 0 {
+			applyAniListCovers(results, al.covers)
+		}
 	}
-	if len(jk.meta) > 0 {
-		applyJikanMeta(results, jk.meta)
+
+	select {
+	case <-ctx.Done():
+		return
+	case jk := <-jikanCh:
+		if len(jk.meta) > 0 {
+			applyJikanMeta(results, jk.meta)
+		}
 	}
 
 	updated := make([]MediaResult, 0, len(results))
@@ -722,6 +945,7 @@ func (a *App) emitSearchCoverUpdates(query string, source string, mediaType stri
 		Results:   updated,
 	})
 }
+
 func applyAniListCovers(results []MediaResult, covers map[string]string) {
 	for i := range results {
 		if results[i].ImageURL != "" {
@@ -1077,20 +1301,6 @@ func parseEpisodeNum(value string) int {
 		}
 	}
 	return 1
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func progressPercent(playbackTime int, duration int) float64 {

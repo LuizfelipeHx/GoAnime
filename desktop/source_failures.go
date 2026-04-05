@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -99,7 +100,9 @@ func recordSourceFailure(groupKey string, action string, source string, err erro
 			items[i].Count++
 			items[i].LastError = message
 			items[i].UpdatedAt = now
-			_ = writeSourceFailures(items)
+			if err := writeSourceFailures(items); err != nil {
+				log.Printf("failed to write source failures: %v", err)
+			}
 			return
 		}
 	}
@@ -112,7 +115,9 @@ func recordSourceFailure(groupKey string, action string, source string, err erro
 		LastError: message,
 		UpdatedAt: now,
 	})
-	_ = writeSourceFailures(items)
+	if err := writeSourceFailures(items); err != nil {
+		log.Printf("failed to write source failures: %v", err)
+	}
 }
 
 func clearSourceFailure(groupKey string, action string, source string) {
@@ -138,6 +143,8 @@ func clearSourceFailure(groupKey string, action string, source string) {
 		filtered = append(filtered, item)
 	}
 	if changed {
-		_ = writeSourceFailures(filtered)
+		if err := writeSourceFailures(filtered); err != nil {
+			log.Printf("failed to write source failures: %v", err)
+		}
 	}
 }

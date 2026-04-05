@@ -1,5 +1,292 @@
 export namespace main {
 	
+	export class AIRecommendation {
+	    title: string;
+	    reason: string;
+	    genres?: string;
+	    score?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AIRecommendation(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.reason = source["reason"];
+	        this.genres = source["genres"];
+	        this.score = source["score"];
+	    }
+	}
+	export class ActivityDay {
+	    date: string;
+	    episodes: number;
+	    minutes: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ActivityDay(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.date = source["date"];
+	        this.episodes = source["episodes"];
+	        this.minutes = source["minutes"];
+	    }
+	}
+	export class AniListProfile {
+	    id: number;
+	    name: string;
+	    avatar: string;
+	    siteUrl: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AniListProfile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.avatar = source["avatar"];
+	        this.siteUrl = source["siteUrl"];
+	    }
+	}
+	export class AniListSyncStatus {
+	    connected: boolean;
+	    profile?: AniListProfile;
+	    lastSync?: string;
+	    tokenStored: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new AniListSyncStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.connected = source["connected"];
+	        this.profile = this.convertValues(source["profile"], AniListProfile);
+	        this.lastSync = source["lastSync"];
+	        this.tokenStored = source["tokenStored"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SourceMapping {
+	    source: string;
+	    url: string;
+	    name: string;
+	    mediaType: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SourceMapping(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.source = source["source"];
+	        this.url = source["url"];
+	        this.name = source["name"];
+	        this.mediaType = source["mediaType"];
+	    }
+	}
+	export class AnimeLibraryEntry {
+	    anilistId: number;
+	    malId?: number;
+	    title: string;
+	    titleRomaji?: string;
+	    titleEnglish?: string;
+	    coverImage?: string;
+	    bannerImage?: string;
+	    genres?: string[];
+	    description?: string;
+	    totalEpisodes?: number;
+	    score?: number;
+	    status?: string;
+	    format?: string;
+	    year?: number;
+	    sources: SourceMapping[];
+	    lastUpdated: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AnimeLibraryEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.anilistId = source["anilistId"];
+	        this.malId = source["malId"];
+	        this.title = source["title"];
+	        this.titleRomaji = source["titleRomaji"];
+	        this.titleEnglish = source["titleEnglish"];
+	        this.coverImage = source["coverImage"];
+	        this.bannerImage = source["bannerImage"];
+	        this.genres = source["genres"];
+	        this.description = source["description"];
+	        this.totalEpisodes = source["totalEpisodes"];
+	        this.score = source["score"];
+	        this.status = source["status"];
+	        this.format = source["format"];
+	        this.year = source["year"];
+	        this.sources = this.convertValues(source["sources"], SourceMapping);
+	        this.lastUpdated = source["lastUpdated"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class AnimeNote {
+	    title: string;
+	    note: string;
+	    rating: number;
+	    updatedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AnimeNote(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.note = source["note"];
+	        this.rating = source["rating"];
+	        this.updatedAt = source["updatedAt"];
+	    }
+	}
+	export class AppSettings {
+	    downloadFolder: string;
+	    defaultMode: string;
+	    defaultQuality: string;
+	    autoplayNext: boolean;
+	    notificationsEnabled: boolean;
+	    playbackSpeed: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new AppSettings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.downloadFolder = source["downloadFolder"];
+	        this.defaultMode = source["defaultMode"];
+	        this.defaultQuality = source["defaultQuality"];
+	        this.autoplayNext = source["autoplayNext"];
+	        this.notificationsEnabled = source["notificationsEnabled"];
+	        this.playbackSpeed = source["playbackSpeed"];
+	    }
+	}
+	export class BotStatus {
+	    aiOnline: boolean;
+	    aiModel?: string;
+	    releasesCount: number;
+	    newReleases: number;
+	    lastCheck?: string;
+	    recsAvailable: boolean;
+	    recsCount: number;
+	    curatedCount: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new BotStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.aiOnline = source["aiOnline"];
+	        this.aiModel = source["aiModel"];
+	        this.releasesCount = source["releasesCount"];
+	        this.newReleases = source["newReleases"];
+	        this.lastCheck = source["lastCheck"];
+	        this.recsAvailable = source["recsAvailable"];
+	        this.recsCount = source["recsCount"];
+	        this.curatedCount = source["curatedCount"];
+	    }
+	}
+	export class CalendarEntry {
+	    title: string;
+	    imageUrl: string;
+	    episode: number;
+	    totalEpisodes: number;
+	    airingAt: number;
+	    format: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CalendarEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.imageUrl = source["imageUrl"];
+	        this.episode = source["episode"];
+	        this.totalEpisodes = source["totalEpisodes"];
+	        this.airingAt = source["airingAt"];
+	        this.format = source["format"];
+	    }
+	}
+	export class CalendarDay {
+	    day: string;
+	    entries: CalendarEntry[];
+	
+	    static createFrom(source: any = {}) {
+	        return new CalendarDay(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.day = source["day"];
+	        this.entries = this.convertValues(source["entries"], CalendarEntry);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	export class CatalogItem {
 	    id: number;
 	    title: string;
@@ -40,6 +327,85 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.label = source["label"];
 	        this.items = this.convertValues(source["items"], CatalogItem);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class NyaaRelease {
+	    title: string;
+	    link: string;
+	    infoHash?: string;
+	    size: string;
+	    // Go type: time
+	    date: any;
+	    seeders: number;
+	    category?: string;
+	    isNew: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new NyaaRelease(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.link = source["link"];
+	        this.infoHash = source["infoHash"];
+	        this.size = source["size"];
+	        this.date = this.convertValues(source["date"], null);
+	        this.seeders = source["seeders"];
+	        this.category = source["category"];
+	        this.isNew = source["isNew"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class CuratedRelease {
+	    release: NyaaRelease;
+	    quality: string;
+	    summary: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CuratedRelease(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.release = this.convertValues(source["release"], NyaaRelease);
+	        this.quality = source["quality"];
+	        this.summary = source["summary"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -266,6 +632,28 @@ export namespace main {
 	        this.name = source["name"];
 	    }
 	}
+	export class ListEntry {
+	    anilistId?: number;
+	    name: string;
+	    url: string;
+	    imageUrl: string;
+	    source: string;
+	    listName: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.anilistId = source["anilistId"];
+	        this.name = source["name"];
+	        this.url = source["url"];
+	        this.imageUrl = source["imageUrl"];
+	        this.source = source["source"];
+	        this.listName = source["listName"];
+	    }
+	}
 	
 	
 	export class MediaResult {
@@ -278,6 +666,9 @@ export namespace main {
 	    score?: number;
 	    description?: string;
 	    genres?: string[];
+	    totalEpisodes?: number;
+	    anilistId?: number;
+	    malId?: number;
 	    canonicalTitle?: string;
 	    groupKey?: string;
 	    seasonNumber?: number;
@@ -311,6 +702,9 @@ export namespace main {
 	        this.score = source["score"];
 	        this.description = source["description"];
 	        this.genres = source["genres"];
+	        this.totalEpisodes = source["totalEpisodes"];
+	        this.anilistId = source["anilistId"];
+	        this.malId = source["malId"];
 	        this.canonicalTitle = source["canonicalTitle"];
 	        this.groupKey = source["groupKey"];
 	        this.seasonNumber = source["seasonNumber"];
@@ -348,6 +742,31 @@ export namespace main {
 		    return a;
 		}
 	}
+	
+	export class QueueEntry {
+	    mediaName: string;
+	    url: string;
+	    source: string;
+	    mediaType: string;
+	    episodeUrl: string;
+	    episodeNumber: string;
+	    imageUrl: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new QueueEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mediaName = source["mediaName"];
+	        this.url = source["url"];
+	        this.source = source["source"];
+	        this.mediaType = source["mediaType"];
+	        this.episodeUrl = source["episodeUrl"];
+	        this.episodeNumber = source["episodeNumber"];
+	        this.imageUrl = source["imageUrl"];
+	    }
+	}
 	export class RelatedAnime {
 	    malId: number;
 	    name: string;
@@ -366,6 +785,27 @@ export namespace main {
 	        this.imageUrl = source["imageUrl"];
 	    }
 	}
+	export class SkipTimesResult {
+	    opStart: number;
+	    opEnd: number;
+	    edStart: number;
+	    edEnd: number;
+	    found: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new SkipTimesResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.opStart = source["opStart"];
+	        this.opEnd = source["opEnd"];
+	        this.edStart = source["edStart"];
+	        this.edEnd = source["edEnd"];
+	        this.found = source["found"];
+	    }
+	}
+	
 	export class StreamRequest {
 	    media: MediaRequest;
 	    episodeUrl: string;
@@ -518,6 +958,50 @@ export namespace main {
 	        this.mediaType = source["mediaType"];
 	        this.lastUpdated = source["lastUpdated"];
 	    }
+	}
+	export class WatchStats {
+	    totalAnime: number;
+	    totalEpisodes: number;
+	    totalMinutes: number;
+	    completedAnime: number;
+	    topGenres: string[];
+	    currentStreak: number;
+	    longestStreak: number;
+	    recentActivity: ActivityDay[];
+	
+	    static createFrom(source: any = {}) {
+	        return new WatchStats(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.totalAnime = source["totalAnime"];
+	        this.totalEpisodes = source["totalEpisodes"];
+	        this.totalMinutes = source["totalMinutes"];
+	        this.completedAnime = source["completedAnime"];
+	        this.topGenres = source["topGenres"];
+	        this.currentStreak = source["currentStreak"];
+	        this.longestStreak = source["longestStreak"];
+	        this.recentActivity = this.convertValues(source["recentActivity"], ActivityDay);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

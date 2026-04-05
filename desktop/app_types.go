@@ -26,6 +26,9 @@ type MediaResult struct {
 	Score              float64            `json:"score,omitempty"`
 	Description        string             `json:"description,omitempty"`
 	Genres             []string           `json:"genres,omitempty"`
+	TotalEpisodes      int                `json:"totalEpisodes,omitempty"`
+	AniListID          int                `json:"anilistId,omitempty"`
+	MalID              int                `json:"malId,omitempty"`
 	CanonicalTitle     string             `json:"canonicalTitle,omitempty"`
 	GroupKey           string             `json:"groupKey,omitempty"`
 	SeasonNumber       int                `json:"seasonNumber,omitempty"`
@@ -166,4 +169,130 @@ type RelatedAnime struct {
 	Name     string `json:"name"`
 	Relation string `json:"relation"`
 	ImageURL string `json:"imageUrl"`
+}
+
+type AppSettings struct {
+	DownloadFolder       string  `json:"downloadFolder"`
+	DefaultMode          string  `json:"defaultMode"`
+	DefaultQuality       string  `json:"defaultQuality"`
+	AutoplayNext         bool    `json:"autoplayNext"`
+	NotificationsEnabled bool    `json:"notificationsEnabled"`
+	PlaybackSpeed        float64 `json:"playbackSpeed"`
+}
+
+type CalendarDay struct {
+	Day     string          `json:"day"`
+	Entries []CalendarEntry `json:"entries"`
+}
+
+type CalendarEntry struct {
+	Title         string `json:"title"`
+	ImageURL      string `json:"imageUrl"`
+	Episode       int    `json:"episode"`
+	TotalEpisodes int    `json:"totalEpisodes"`
+	AiringAt      int64  `json:"airingAt"`
+	Format        string `json:"format"`
+}
+
+type SkipTimesResult struct {
+	OpStart float64 `json:"opStart"`
+	OpEnd   float64 `json:"opEnd"`
+	EdStart float64 `json:"edStart"`
+	EdEnd   float64 `json:"edEnd"`
+	Found   bool    `json:"found"`
+}
+
+// ─── Anime Library ───
+
+type AnimeLibraryEntry struct {
+	AniListID     int             `json:"anilistId"`
+	MalID         int             `json:"malId,omitempty"`
+	Title         string          `json:"title"`
+	TitleRomaji   string          `json:"titleRomaji,omitempty"`
+	TitleEnglish  string          `json:"titleEnglish,omitempty"`
+	CoverImage    string          `json:"coverImage,omitempty"`
+	BannerImage   string          `json:"bannerImage,omitempty"`
+	Genres        []string        `json:"genres,omitempty"`
+	Description   string          `json:"description,omitempty"`
+	TotalEpisodes int             `json:"totalEpisodes,omitempty"`
+	Score         float64         `json:"score,omitempty"`
+	Status        string          `json:"status,omitempty"`
+	Format        string          `json:"format,omitempty"`
+	Year          int             `json:"year,omitempty"`
+	Sources       []SourceMapping `json:"sources"`
+	LastUpdated   string          `json:"lastUpdated"`
+}
+
+type SourceMapping struct {
+	Source    string `json:"source"`
+	URL       string `json:"url"`
+	Name      string `json:"name"`
+	MediaType string `json:"mediaType"`
+}
+
+// ─── Custom Lists ───
+
+type ListEntry struct {
+	AniListID int    `json:"anilistId,omitempty"`
+	Name      string `json:"name"`
+	URL       string `json:"url"`
+	ImageURL  string `json:"imageUrl"`
+	Source    string `json:"source"`
+	ListName  string `json:"listName"`
+}
+
+// ─── Watch Stats ───
+
+type WatchStats struct {
+	TotalAnime     int           `json:"totalAnime"`
+	TotalEpisodes  int           `json:"totalEpisodes"`
+	TotalMinutes   int           `json:"totalMinutes"`
+	CompletedAnime int           `json:"completedAnime"`
+	TopGenres      []string      `json:"topGenres"`
+	CurrentStreak  int           `json:"currentStreak"`
+	LongestStreak  int           `json:"longestStreak"`
+	RecentActivity []ActivityDay `json:"recentActivity"`
+}
+
+type ActivityDay struct {
+	Date     string `json:"date"`
+	Episodes int    `json:"episodes"`
+	Minutes  int    `json:"minutes"`
+}
+
+// ─── Play Queue ───
+
+type QueueEntry struct {
+	MediaName     string `json:"mediaName"`
+	MediaURL      string `json:"url"`
+	MediaSource   string `json:"source"`
+	MediaType     string `json:"mediaType"`
+	EpisodeURL    string `json:"episodeUrl"`
+	EpisodeNumber string `json:"episodeNumber"`
+	ImageURL      string `json:"imageUrl"`
+}
+
+// ─── Anime Notes ───
+
+type AnimeNote struct {
+	Title     string  `json:"title"`
+	Note      string  `json:"note"`
+	Rating    float64 `json:"rating"`
+	UpdatedAt string  `json:"updatedAt"`
+}
+
+// ─── AniList Sync ───
+
+type AniListProfile struct {
+	ID      int    `json:"id"`
+	Name    string `json:"name"`
+	Avatar  string `json:"avatar"`
+	SiteURL string `json:"siteUrl"`
+}
+
+type AniListSyncStatus struct {
+	Connected   bool            `json:"connected"`
+	Profile     *AniListProfile `json:"profile,omitempty"`
+	LastSync    string          `json:"lastSync,omitempty"`
+	TokenStored bool            `json:"tokenStored"`
 }

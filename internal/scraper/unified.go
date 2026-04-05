@@ -19,13 +19,14 @@ type ScraperType int
 // Timeout configurations - balanced for multiple sources
 const (
 	// searchTimeout is the maximum time to wait for all scrapers
-	searchTimeout = 25 * time.Second
+	searchTimeout = 15 * time.Second
 	// perScraperTimeout is the timeout for individual scrapers
-	perScraperTimeout = 20 * time.Second
-	// earlyReturnDelay is the time to wait after first results before returning
-	earlyReturnDelay = 2000 * time.Millisecond
+	perScraperTimeout = 12 * time.Second
+	// earlyReturnDelay is the time to wait after first results before returning.
+	// With Bakashi's concurrent search (~3-5s), 5s after first result is enough.
+	earlyReturnDelay = 5 * time.Second
 	// minResultsForEarlyReturn is the minimum results needed to trigger early return
-	minResultsForEarlyReturn = 8
+	minResultsForEarlyReturn = 3
 )
 
 const (
@@ -145,8 +146,12 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 	resultChan := make(chan searchResult, len(sm.scrapers))
 	var wg sync.WaitGroup
 
-	// Launch all scrapers concurrently
+	// Launch all scrapers concurrently (skip English-only sources in default search)
 	for sType, scraper := range sm.scrapers {
+		if sType == AllAnimeType || sType == FlixHQType {
+			totalScrapers--
+			continue
+		}
 		wg.Add(1)
 		go func(st ScraperType, s UnifiedScraper) {
 			defer wg.Done()
@@ -266,6 +271,8 @@ func (sm *ScraperManager) searchWithTimeout(ctx context.Context, st ScraperType,
 	done := make(chan searchResult, 1)
 
 	go func() {
+		// Each scraper already handles its own retries internally;
+		// no extra retry layer here to avoid compounding wait times.
 		results, err := s.SearchAnime(query)
 		done <- searchResult{
 			scraperType: st,

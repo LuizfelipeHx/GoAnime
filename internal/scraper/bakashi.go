@@ -36,7 +36,7 @@ func NewBakashiClient() *BakashiClient {
 	return &BakashiClient{
 		client:     util.GetFastClient(),
 		baseURL:    BakashiBase,
-		maxRetries: 2,
+		maxRetries: 1,
 		retryDelay: 300 * time.Millisecond,
 	}
 }
@@ -74,24 +74,43 @@ func (c *BakashiClient) searchWordPress(query string) ([]*models.Anime, error) {
 		fmt.Sprintf("%s/filmes/?s=%s", c.baseURL, url.QueryEscape(query)),
 	}
 
+	// Fetch all URLs concurrently — return as soon as any yields results
+	type wpResult struct {
+		results []*models.Anime
+		err     error
+	}
+	ch := make(chan wpResult, len(searchURLs))
 	for _, searchURL := range searchURLs {
-		doc, err := c.fetchPage(searchURL, c.baseURL+"/")
-		if err != nil {
-			continue
-		}
-		results := c.extractSearchResults(doc, query)
-		if len(results) > 0 {
-			return results, nil
+		go func(u string) {
+			doc, err := c.fetchPage(u, c.baseURL+"/")
+			if err != nil {
+				ch <- wpResult{nil, err}
+				return
+			}
+			ch <- wpResult{c.extractSearchResults(doc, query), nil}
+		}(searchURL)
+	}
+
+	var best []*models.Anime
+	for range searchURLs {
+		r := <-ch
+		if r.err == nil && len(r.results) > 0 {
+			if best == nil || len(r.results) > len(best) {
+				best = r.results
+			}
 		}
 	}
 
+	if len(best) > 0 {
+		return best, nil
+	}
 	return nil, fmt.Errorf("nenhum resultado no search do wordpress")
 }
 
 func (c *BakashiClient) searchCatalogPages(query string) ([]*models.Anime, error) {
-	pageURLs := make([]string, 0, 10)
+	pageURLs := make([]string, 0, 4)
 	for _, base := range []string{"/animes/", "/filmes/"} {
-		for page := 1; page <= 5; page++ {
+		for page := 1; page <= 2; page++ {
 			if page == 1 {
 				pageURLs = append(pageURLs, c.baseURL+base)
 				continue
@@ -100,14 +119,27 @@ func (c *BakashiClient) searchCatalogPages(query string) ([]*models.Anime, error
 		}
 	}
 
+	// Fetch catalog pages concurrently
+	type catalogResult struct {
+		items []*models.Anime
+	}
+	ch := make(chan catalogResult, len(pageURLs))
+	for _, pageURL := range pageURLs {
+		go func(u string) {
+			doc, err := c.fetchPage(u, c.baseURL+"/animes/")
+			if err != nil {
+				ch <- catalogResult{nil}
+				return
+			}
+			ch <- catalogResult{c.extractSearchResults(doc, query)}
+		}(pageURL)
+	}
+
 	seen := make(map[string]bool)
 	var results []*models.Anime
-	for _, pageURL := range pageURLs {
-		doc, err := c.fetchPage(pageURL, c.baseURL+"/animes/")
-		if err != nil {
-			continue
-		}
-		for _, item := range c.extractSearchResults(doc, query) {
+	for range pageURLs {
+		r := <-ch
+		for _, item := range r.items {
 			if item == nil {
 				continue
 			}
@@ -139,13 +171,13 @@ func (c *BakashiClient) GetCatalogSections() ([]BakashiCatalogSection, error) {
 
 	sections := make([]BakashiCatalogSection, 0, 4)
 	if items := c.extractItemsFromSelection(doc.Find("#featured-titles article.item"), "", true); len(items) > 0 {
-		sections = append(sections, BakashiCatalogSection{Label: "Lan�amentos PT-BR", Items: items})
+		sections = append(sections, BakashiCatalogSection{Label: "Lançamentos PT-BR", Items: items})
 	}
 	if items := c.extractItemsFromSelection(doc.Find("#dt-tvshows article.item"), "", true); len(items) > 0 {
 		sections = append(sections, BakashiCatalogSection{Label: "Animes em PT-BR", Items: items})
 	}
 	if items := c.extractEpisodeCatalogItems(doc.Find("div.animation-2.items.full article.item.se.episodes")); len(items) > 0 {
-		sections = append(sections, BakashiCatalogSection{Label: "Epis�dios recentes", Items: items})
+		sections = append(sections, BakashiCatalogSection{Label: "Episódios recentes", Items: items})
 	}
 
 	filmDoc, err := c.fetchPage(c.baseURL+"/filmes/", c.baseURL+"/")
@@ -403,10 +435,20 @@ func (c *BakashiClient) GetEpisodeStreamURL(episodeURL string) (string, error) {
 	}
 
 	var failures []string
+	var bloggerFallback string
 	for _, option := range options {
 		embedURL, err := c.fetchPlayerEmbedURL(episodeURL, option)
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("%s: %v", option.Label, err))
+			continue
+		}
+
+		// Blogger/Google Video embeds can't be extracted by yt-dlp;
+		// keep as iframe fallback.
+		if strings.Contains(embedURL, "blogger.com/video") {
+			if bloggerFallback == "" {
+				bloggerFallback = embedURL
+			}
 			continue
 		}
 
@@ -417,6 +459,12 @@ func (c *BakashiClient) GetEpisodeStreamURL(episodeURL string) (string, error) {
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("%s: %v", option.Label, err))
 		}
+	}
+
+	// Fallback: return Blogger embed URL prefixed with "iframe:" so the
+	// caller knows to render it inside an iframe instead of a <video> tag.
+	if bloggerFallback != "" {
+		return "iframe:" + bloggerFallback, nil
 	}
 
 	if len(failures) > 0 {

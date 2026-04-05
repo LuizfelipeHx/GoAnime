@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Hls from 'hls.js'
 import { Catalog } from './Catalog'
+import Settings from './Settings'
+import Stats from './Stats'
+import AnimeNotes from './AnimeNotes'
 import {
   BrowserOpenURL,
   EventsOn,
@@ -29,6 +32,43 @@ import {
   removeFavorite,
   searchMedia,
   updateWatchProgress,
+  getBotStatus,
+  getNyaaReleases,
+  clearNewReleases,
+  getAIRecommendations,
+  refreshRecommendations,
+  getCuratedReleases,
+  refreshCuratedReleases,
+  getSettings,
+  saveSettings,
+  getSeasonCalendar,
+  getWatchedEpisodes,
+  setEpisodeWatched,
+  getSkipTimes,
+  getCustomLists,
+  getListNames,
+  addToList,
+  removeFromList,
+  moveToList,
+  getWatchStats,
+  getPlayQueue,
+  addToQueue,
+  removeFromQueue,
+  clearQueue,
+  getAnimeNote,
+  saveAnimeNote,
+  getAniListSyncStatus,
+  startAniListAuth,
+  disconnectAniList,
+  syncToAniList,
+  getAnimeDetails,
+  type AppSettings,
+  type AnimeLibraryEntry,
+  type BotStatus,
+  type CalendarDay,
+  type NyaaRelease,
+  type AIRecommendation,
+  type CuratedRelease,
   type CatalogSection,
   type EpisodeResult,
   type FavoriteEntry,
@@ -37,14 +77,20 @@ import {
   type MediaResult,
   type RelatedAnime,
   type SearchCoversEvent,
+  type SkipTimesResult,
   type WatchProgressEntry,
+  type ListEntry,
+  type WatchStats,
+  type QueueEntry,
+  type AnimeNote,
+  type AniListSyncStatus,
 } from './lib/backend'
 
 type SourceFilter = 'all' | 'allanime' | 'animefire' | 'flixhq' | 'animesonlinecc' | 'anroll' | 'bakashi'
 type TypeFilter = 'all' | 'anime' | 'movie' | 'tv'
 type LangFilter = 'all' | 'pt' | 'en'
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
-type ViewMode = 'catalog' | 'movies' | 'favorites' | 'watching'
+type ViewMode = 'catalog' | 'movies' | 'favorites' | 'watching' | 'history' | 'bots' | 'settings' | 'calendar' | 'stats' | 'lists' | 'queue'
 type MovieSourceMode = 'ptbr' | 'extra'
 type ToastType = 'success' | 'error' | 'info'
 type Toast = { id: number; message: string; type: ToastType }
@@ -85,6 +131,10 @@ const progressMetaKey = 'progress-meta'
 
 function cleanTitle(value: string) {
   return value.replace(/\[(English|Portuguese|Portugu\u00EAs|Dublado|Legendado|Dub|Sub)\]/gi, '').trim()
+}
+
+function normalizeSearchText(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
 type LangTag = { label: string; variant: 'pt' | 'en' | 'neutral' }
@@ -444,12 +494,14 @@ export default function App() {
   const [activeMedia, setActiveMedia] = useState<MediaResult | null>(null)
   const [episodes, setEpisodes] = useState<EpisodeResult[]>([])
   const [episodeIndex, setEpisodeIndex] = useState(0)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   const [mode, setMode] = useState<'sub' | 'dub'>(() => readPref('pref-mode', 'sub') as 'sub' | 'dub')
   const [quality, setQuality] = useState(() => readPref('pref-quality', 'best'))
 
   const [playerMessage, setPlayerMessage] = useState('Selecione um titulo para começar.')
   const [playerState, setPlayerState] = useState<LoadState>('idle')
+  const [iframeUrl, setIframeUrl] = useState<string | null>(null)
   const [isMaximised, setIsMaximised] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
@@ -463,6 +515,61 @@ export default function App() {
   const [selectedGenre, setSelectedGenre] = useState('')
   const [genreSections, setGenreSections] = useState<CatalogSection[]>([])
   const [genreLoading, setGenreLoading] = useState(false)
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [botStatus, setBotStatus] = useState<BotStatus>({ aiOnline: false, releasesCount: 0, newReleases: 0, recsAvailable: false, recsCount: 0, curatedCount: 0 })
+  const [nyaaReleases, setNyaaReleases] = useState<NyaaRelease[]>([])
+  const [aiRecs, setAiRecs] = useState<AIRecommendation[]>([])
+  const [curatedReleases, setCuratedReleases] = useState<CuratedRelease[]>([])
+  const [botsLoading, setBotsLoading] = useState(false)
+
+  // Episode filter
+  const [episodeFilter, setEpisodeFilter] = useState('')
+
+  // Picture-in-Picture
+  const [isPip, setIsPip] = useState(false)
+
+  // Playback speed
+  const [playbackSpeed, setPlaybackSpeed] = useState(1.0)
+
+  // Settings
+  const [settings, setSettings] = useState<AppSettings | null>(null)
+
+  // Season calendar
+  const [seasonCalendar, setSeasonCalendar] = useState<CalendarDay[]>([])
+
+  // Watched episode marks
+  const [watchedMarks, setWatchedMarks] = useState<Set<number>>(new Set())
+
+  // Skip intro/ending
+  const [skipTimes, setSkipTimes] = useState<SkipTimesResult | null>(null)
+  const [showSkipIntro, setShowSkipIntro] = useState(false)
+  const [showSkipEnding, setShowSkipEnding] = useState(false)
+
+  // Custom lists
+  const [customLists, setCustomLists] = useState<Record<string, ListEntry[]>>({})
+  const [listNames, setListNames] = useState<string[]>([])
+  const [selectedList, setSelectedList] = useState('Favoritos')
+
+  // Stats
+  const [watchStats, setWatchStats] = useState<WatchStats | null>(null)
+
+  // Play queue
+  const [playQueue, setPlayQueue] = useState<QueueEntry[]>([])
+
+  // Notes
+  const [showNotes, setShowNotes] = useState(false)
+  const [activeNote, setActiveNote] = useState<AnimeNote | null>(null)
+
+  // AniList sync
+  const [anilistStatus, setAnilistStatus] = useState<AniListSyncStatus | null>(null)
+
+  // List action dropdown (for moving between lists)
+  const [listDropdownFor, setListDropdownFor] = useState<string | null>(null)
+
+  // Anime detail view
+  const [animeDetail, setAnimeDetail] = useState<AnimeLibraryEntry | null>(null)
+  const [animeDetailLoading, setAnimeDetailLoading] = useState(false)
+  const animeDetailMediaRef = useRef<MediaResult | null>(null)
 
   const trimmedQuery = useMemo(() => query.trim(), [query])
   const sourceOptions = useMemo(() => {
@@ -486,6 +593,13 @@ export default function App() {
     return displayResults
   }, [displayResults, view, movieSourceMode])
 
+  const filteredEpisodes = useMemo(() => {
+    if (!episodeFilter.trim()) return episodes.map((ep, i) => ({ ep, originalIndex: i }))
+    const q = episodeFilter.toLowerCase()
+    return episodes.map((ep, i) => ({ ep, originalIndex: i }))
+      .filter(({ ep }) => ep.number.includes(q) || ep.title?.toLowerCase().includes(q) || String(ep.num).includes(q))
+  }, [episodes, episodeFilter])
+
   const movieFavorites = useMemo(() => favorites.filter(item => item.mediaType === 'movie'), [favorites])
   const movieProgress = useMemo(() => progress.filter(item => item.mediaType === 'movie'), [progress])
   const canNext = episodes.length > 0 && episodeIndex < episodes.length - 1
@@ -495,6 +609,29 @@ export default function App() {
   const hasSidebarContent = favorites.length > 0 || progress.length > 0 || history.length > 0
   const isActiveFavorite = activeMedia ? favoriteKeys.has(favoriteKey(activeMedia.source, activeMedia.url)) : false
   const searchPlaceholder = view === 'movies' ? 'Buscar filme...' : 'Buscar anime ou série...'
+
+  const suggestions = useMemo(() => {
+    if (!query || query.length < 1 || searchState === 'loading') return []
+    const q = query.toLowerCase()
+    const fromHistory = history
+      .filter(h => h.name.toLowerCase().includes(q))
+      .map(h => ({ text: h.name, type: 'history' as const }))
+    const fromResults = results
+      .filter(r => cleanTitle(r.name).toLowerCase().includes(q))
+      .slice(0, 3)
+      .map(r => ({ text: cleanTitle(r.name), type: 'result' as const }))
+    const seen = new Set<string>()
+    const merged: { text: string; type: 'history' | 'result' }[] = []
+    for (const item of [...fromHistory, ...fromResults]) {
+      const key = item.text.toLowerCase()
+      if (!seen.has(key) && key !== q) {
+        seen.add(key)
+        merged.push(item)
+      }
+      if (merged.length >= 6) break
+    }
+    return merged
+  }, [query, history, results, searchState])
 
   const showToast = (message: string, type: ToastType = 'info') => {
     const id = ++toastIdRef.current
@@ -560,6 +697,10 @@ export default function App() {
         setMovieCatalogError(err instanceof Error ? err.message : 'Falha ao carregar catálogo de filmes')
       })
       .finally(() => setMovieCatalogLoading(false))
+
+    getCustomLists().then(setCustomLists).catch(() => {})
+    getListNames().then(setListNames).catch(() => {})
+    getAniListSyncStatus().then(setAnilistStatus).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -569,34 +710,6 @@ export default function App() {
   }, [sourceOptions, source])
 
   useEffect(() => {
-    const unsubscribe = EventsOn('search:covers', (event: SearchCoversEvent) => {
-      if (!event) return
-      if (event.query.trim().toLowerCase() !== trimmedQuery.toLowerCase()) return
-      if (event.source.trim().toLowerCase() !== source.toLowerCase()) return
-      if (event.mediaType.trim().toLowerCase() !== mediaType.toLowerCase()) return
-
-      const updates = new Map(
-        event.results.map(item => [favoriteKey(item.source, item.url), item] as const),
-      )
-      if (updates.size === 0) return
-
-      setResults(current => current.map(item => {
-        const upd = updates.get(favoriteKey(item.source, item.url))
-        if (!upd) return item
-        return {
-          ...item,
-          imageUrl: upd.imageUrl || item.imageUrl,
-          score: upd.score ?? item.score,
-          description: upd.description || item.description,
-          genres: upd.genres?.length ? upd.genres : item.genres,
-        }
-      }))
-    })
-
-    return () => unsubscribe()
-  }, [trimmedQuery, source, mediaType])
-
-  useEffect(() => {
     if (trimmedQuery.length < 2) {
       setResults([])
       setSearchState('idle')
@@ -604,7 +717,11 @@ export default function App() {
       return
     }
 
-    if (view === 'favorites' || view === 'watching') {
+    // Close anime detail when starting a new search
+    setAnimeDetail(null)
+    animeDetailMediaRef.current = null
+
+    if (view === 'favorites' || view === 'watching' || view === 'history' || view === 'bots' || view === 'settings' || view === 'calendar' || view === 'stats' || view === 'lists' || view === 'queue') {
       setView('catalog')
     }
     let cancelled = false
@@ -616,7 +733,7 @@ export default function App() {
         if (cancelled) return
         setResults(data)
         setSearchState('ready')
-        setSearchMessage(data.length ? `${data.length} resultado(s)` : 'Nenhum resultado encontrado.')
+        setSearchMessage(data.length ? `${data.length} resultado(s) encontrado(s)` : 'Nenhum resultado encontrado.')
       } catch (err) {
         if (cancelled) return
         setSearchState('error')
@@ -631,27 +748,201 @@ export default function App() {
     }
   }, [trimmedQuery, source, mediaType])
 
+  // Listen for streaming partial search results
+  useEffect(() => {
+    const unsubscribe = EventsOn('search:partial', (partialResults: MediaResult[]) => {
+      if (!partialResults?.length || searchState !== 'loading') return
+      setResults(current => {
+        const existing = new Set(current.map(r => `${r.source}|${r.url}`))
+        const newItems = partialResults.filter(r => !existing.has(`${r.source}|${r.url}`))
+        if (newItems.length === 0) return current
+        return [...current, ...newItems]
+      })
+      setSearchState('loading') // Keep loading state (more may come)
+      setSearchMessage(prev => {
+        const match = prev.match(/\d+/)
+        const prevCount = match ? parseInt(match[0], 10) : 0
+        return `${prevCount + partialResults.length} resultado(s) e buscando...`
+      })
+    })
+    return () => unsubscribe()
+  }, [searchState])
+
   useEffect(() => () => { hlsRef.current?.destroy() }, [])
+
+  // Fetch bot status periodically
+  useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        const status = await getBotStatus()
+        setBotStatus(status)
+      } catch {}
+    }
+    fetchStatus()
+    const interval = setInterval(fetchStatus, 30000) // every 30s
+    return () => clearInterval(interval)
+  }, [])
+
+  // Listen for new releases event
+  useEffect(() => {
+    const unsub = EventsOn('bot:newReleases', (data: { count: number }) => {
+      setBotStatus(prev => ({ ...prev, newReleases: prev.newReleases + (data?.count || 0) }))
+    })
+    return () => unsub()
+  }, [])
+
+  // PiP event listeners
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    const onEnterPip = () => setIsPip(true)
+    const onLeavePip = () => setIsPip(false)
+    video.addEventListener('enterpictureinpicture', onEnterPip)
+    video.addEventListener('leavepictureinpicture', onLeavePip)
+    return () => {
+      video.removeEventListener('enterpictureinpicture', onEnterPip)
+      video.removeEventListener('leavepictureinpicture', onLeavePip)
+    }
+  }, [])
+
+  // Load settings on mount
+  useEffect(() => {
+    getSettings().then(setSettings).catch(() => {})
+  }, [])
+
+  // Load calendar when view changes to 'calendar'
+  useEffect(() => {
+    if (view !== 'calendar') return
+    getSeasonCalendar().then(setSeasonCalendar).catch(() => setSeasonCalendar([]))
+  }, [view])
+
+  // Load stats when view changes to stats
+  useEffect(() => {
+    if (view === 'stats') {
+      getWatchStats().then(setWatchStats).catch(() => {})
+    }
+  }, [view])
+
+  // Load queue when view changes to queue
+  useEffect(() => {
+    if (view === 'queue') {
+      getPlayQueue().then(setPlayQueue).catch(() => {})
+    }
+  }, [view])
+
+  // Load note when activeMedia changes
+  useEffect(() => {
+    if (activeMedia) {
+      const title = cleanTitle(activeMedia.name)
+      getAnimeNote(title).then(setActiveNote).catch(() => setActiveNote(null))
+    }
+  }, [activeMedia])
+
+  // Load watched marks when activeMedia changes
+  useEffect(() => {
+    if (!activeMedia) { setWatchedMarks(new Set()); return }
+    const key = activeMedia.groupKey || normalizeSearchText(cleanTitle(activeMedia.name))
+    if (!key) return
+    getWatchedEpisodes(key)
+      .then(nums => setWatchedMarks(new Set(nums)))
+      .catch(() => setWatchedMarks(new Set()))
+  }, [activeMedia])
+
+  // Load bot data when switching to bots view
+  useEffect(() => {
+    if (view !== 'bots') return
+    const load = async () => {
+      setBotsLoading(true)
+      try {
+        const [releases, recs, curated] = await Promise.all([
+          getNyaaReleases(),
+          getAIRecommendations(),
+          getCuratedReleases(),
+        ])
+        setNyaaReleases(releases || [])
+        setAiRecs(recs || [])
+        setCuratedReleases(curated || [])
+        await clearNewReleases()
+        setBotStatus(prev => ({ ...prev, newReleases: 0 }))
+      } catch {}
+      setBotsLoading(false)
+    }
+    load()
+  }, [view])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const tag = (event.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
 
-      if ((event.key === 'ArrowRight' || event.key.toLowerCase() === 'n') && canNext) {
+      // Space to toggle play/pause
+      if (event.key === ' ' || event.code === 'Space') {
+        event.preventDefault()
+        const video = videoRef.current
+        if (video) {
+          if (video.paused) {
+            video.play().catch(() => {})
+          } else {
+            video.pause()
+          }
+        }
+      }
+
+      // Arrow keys for seeking (when not in episode navigation)
+      if (event.key === 'ArrowRight' && event.shiftKey) {
+        event.preventDefault()
+        const video = videoRef.current
+        if (video) video.currentTime = Math.min(video.duration, video.currentTime + 10)
+      }
+      if (event.key === 'ArrowLeft' && event.shiftKey) {
+        event.preventDefault()
+        const video = videoRef.current
+        if (video) video.currentTime = Math.max(0, video.currentTime - 10)
+      }
+
+      // M to toggle mute
+      if (event.key.toLowerCase() === 'm') {
+        const video = videoRef.current
+        if (video) video.muted = !video.muted
+      }
+
+      if (((event.key === 'ArrowRight' && !event.shiftKey) || event.key.toLowerCase() === 'n') && canNext) {
         setEpisodeIndex(index => index + 1)
       }
-      if ((event.key === 'ArrowLeft' || event.key.toLowerCase() === 'p') && episodeIndex > 0) {
+      if (((event.key === 'ArrowLeft' && !event.shiftKey) || event.key.toLowerCase() === 'p') && episodeIndex > 0) {
         setEpisodeIndex(index => index - 1)
       }
       if (event.key.toLowerCase() === 'f') {
         void handleToggleFullscreen()
       }
+
+      // PiP toggle
+      if (event.key.toLowerCase() === 'i') {
+        void handleTogglePip()
+      }
+
+      // Speed control: ] increase, [ decrease
+      if (event.key === ']') {
+        const idx = speedSteps.indexOf(playbackSpeed)
+        if (idx < speedSteps.length - 1) {
+          const next = speedSteps[idx + 1]
+          setPlaybackSpeed(next)
+          if (videoRef.current) videoRef.current.playbackRate = next
+        }
+      }
+      if (event.key === '[') {
+        const idx = speedSteps.indexOf(playbackSpeed)
+        if (idx > 0) {
+          const prev = speedSteps[idx - 1]
+          setPlaybackSpeed(prev)
+          if (videoRef.current) videoRef.current.playbackRate = prev
+        }
+      }
     }
 
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [canNext, episodeIndex, isFullscreen])
+  }, [canNext, episodeIndex, isFullscreen, playbackSpeed])
 
   useEffect(() => {
     const list = episodeListRef.current
@@ -706,6 +997,13 @@ export default function App() {
     const video = videoRef.current
     if (!video) return
 
+    // Skip intro/ending button visibility
+    if (skipTimes && skipTimes.found) {
+      const t = video.currentTime
+      setShowSkipIntro(t >= skipTimes.opStart && t < skipTimes.opEnd)
+      setShowSkipEnding(t >= skipTimes.edStart && t < skipTimes.edEnd)
+    }
+
     const currentSecond = Math.floor(video.currentTime)
     if (Math.abs(currentSecond - lastSavedSecondRef.current) < 5) return
 
@@ -753,7 +1051,146 @@ export default function App() {
     }
   }
 
+  const handleAddToList = async (listName: string) => {
+    if (!activeMedia) return
+    const entry: ListEntry = {
+      name: cleanTitle(activeMedia.name),
+      url: activeMedia.url,
+      imageUrl: activeMedia.imageUrl || '',
+      source: activeMedia.source,
+      listName,
+    }
+    await addToList(listName, entry)
+    const updated = await getCustomLists()
+    setCustomLists(updated)
+    showToast(`Adicionado a "${listName}"`, 'success')
+    setListDropdownFor(null)
+  }
+
+  const handleRemoveFromList = async (listName: string, name: string) => {
+    await removeFromList(listName, name)
+    const updated = await getCustomLists()
+    setCustomLists(updated)
+  }
+
+  const handleMoveToList = async (fromList: string, toList: string, name: string) => {
+    await moveToList(fromList, toList, name)
+    const updated = await getCustomLists()
+    setCustomLists(updated)
+    showToast(`Movido para "${toList}"`, 'success')
+  }
+
+  const handleAddToQueue = async () => {
+    if (!activeMedia || !currentEpisode) return
+    const entry: QueueEntry = {
+      mediaName: cleanTitle(activeMedia.name),
+      url: activeMedia.url,
+      source: activeMedia.source,
+      mediaType: activeMedia.mediaType || 'anime',
+      episodeUrl: currentEpisode.url,
+      episodeNumber: currentEpisode.num ? String(currentEpisode.num) : currentEpisode.number,
+      imageUrl: activeMedia.imageUrl || '',
+    }
+    await addToQueue(entry)
+    const updated = await getPlayQueue()
+    setPlayQueue(updated)
+    showToast('Adicionado \u00e0 fila', 'success')
+  }
+
+  const handleSaveNote = async (note: AnimeNote) => {
+    await saveAnimeNote(note)
+    setActiveNote(note)
+    setShowNotes(false)
+    showToast('Nota salva!', 'success')
+  }
+
+  const handleAniListAuth = async () => {
+    try {
+      const url = await startAniListAuth()
+      window.open(url, '_blank')
+      showToast('Autorize no navegador e volte aqui', 'info')
+      // Poll for status update
+      setTimeout(async () => {
+        const status = await getAniListSyncStatus()
+        setAnilistStatus(status)
+      }, 10000)
+    } catch {
+      showToast('Erro ao iniciar autentica\u00e7\u00e3o', 'error')
+    }
+  }
+
+  const handleTogglePip = async () => {
+    const video = videoRef.current
+    if (!video) return
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture()
+      } else if (document.pictureInPictureEnabled) {
+        await video.requestPictureInPicture()
+      }
+    } catch {}
+  }
+
+  const speedSteps = [0.5, 0.75, 1, 1.25, 1.5, 2]
+
   const dubSources = new Set(['animefire', 'animesonlinecc'])
+
+  const handleCardClick = async (item: MediaResult) => {
+    if (item.anilistId && item.anilistId > 0) {
+      setAnimeDetailLoading(true)
+      setAnimeDetail(null)
+      try {
+        const detail = await getAnimeDetails(item.anilistId)
+        setAnimeDetail(detail)
+      } catch {
+        // Fallback: build a minimal detail from the search result
+        setAnimeDetail({
+          anilistId: item.anilistId || 0,
+          malId: item.malId || 0,
+          title: cleanTitle(item.name),
+          titleRomaji: item.canonicalTitle || '',
+          titleEnglish: '',
+          coverImage: item.imageUrl || '',
+          bannerImage: '',
+          genres: item.genres || [],
+          description: item.description || '',
+          totalEpisodes: item.totalEpisodes || 0,
+          score: item.score || 0,
+          status: '',
+          format: '',
+          year: item.year ? parseInt(item.year, 10) || 0 : 0,
+          sources: (item.alternatives || []).map(a => ({
+            source: a.source,
+            url: a.url,
+            name: a.name,
+            mediaType: a.mediaType,
+          })),
+          lastUpdated: '',
+        })
+      } finally {
+        setAnimeDetailLoading(false)
+      }
+      // Store the original media result for the "Assistir" action
+      animeDetailMediaRef.current = item
+    } else {
+      // No anilistId - fallback to direct episode loading
+      void handleOpenMedia(item)
+    }
+  }
+
+  const handleDetailWatch = () => {
+    const item = animeDetailMediaRef.current
+    if (item) {
+      setAnimeDetail(null)
+      animeDetailMediaRef.current = null
+      void handleOpenMedia(item)
+    }
+  }
+
+  const handleDetailClose = () => {
+    setAnimeDetail(null)
+    animeDetailMediaRef.current = null
+  }
 
   const handleOpenMedia = async (item: MediaResult) => {
     // Auto-detect audio mode from title tag or source
@@ -768,6 +1205,7 @@ export default function App() {
     setActiveMedia(item)
     setEpisodes([])
     setEpisodeIndex(0)
+    setEpisodeFilter('')
     setRelated([])
     setRelatedLoading(true)
     setPlayerState('loading')
@@ -845,6 +1283,7 @@ export default function App() {
     subtitles: Array<{ proxyUrl: string; url: string; label: string; language: string }> = [],
     resumeAt = 0,
   ) => {
+    setIframeUrl(null) // clear iframe if switching to video
     const video = videoRef.current
     if (!video) return
 
@@ -884,6 +1323,7 @@ export default function App() {
 
     try {
       await video.play()
+      if (playbackSpeed !== 1) video.playbackRate = playbackSpeed
       setPlayerMessage('Reprodu\u00e7\u00e3o iniciada.')
       setPlayerState('ready')
     } catch {
@@ -929,12 +1369,21 @@ export default function App() {
 
       setEpisodeIndex(targetIndex)
       lastSavedSecondRef.current = resumeAt
-      await loadVideo(
-        stream.proxyUrl || stream.streamUrl,
-        stream.contentType || 'video/*',
-        stream.subtitles,
-        resumeAt,
-      )
+
+      // Iframe-only embeds (e.g. Blogger Video): render in iframe instead of <video>
+      if (stream.contentType === 'iframe') {
+        setIframeUrl(stream.streamUrl)
+        setPlayerMessage('Reprodução via player externo.')
+        setPlayerState('ready')
+      } else {
+        setIframeUrl(null)
+        await loadVideo(
+          stream.proxyUrl || stream.streamUrl,
+          stream.contentType || 'video/*',
+          stream.subtitles,
+          resumeAt,
+        )
+      }
     } catch (err) {
       setPlayerMessage(err instanceof Error ? err.message : 'Erro ao carregar stream')
       setPlayerState('error')
@@ -982,6 +1431,24 @@ export default function App() {
     } catch {
       setIsMaximised(false)
     }
+  }
+
+  const handleClosePlayer = () => {
+    // Stop video/hls playback
+    hlsRef.current?.destroy()
+    hlsRef.current = null
+    if (videoRef.current) {
+      videoRef.current.pause()
+      videoRef.current.removeAttribute('src')
+      videoRef.current.load()
+    }
+    setIframeUrl(null)
+    setActiveMedia(null)
+    setEpisodes([])
+    setEpisodeIndex(0)
+    setPlayerState('idle')
+    setPlayerMessage('Selecione um título para começar.')
+    setRelated([])
   }
 
   const handleToggleFullscreen = async () => {
@@ -1047,9 +1514,9 @@ export default function App() {
   const catalogDisplayLoading = selectedGenre ? genreLoading : catalogLoading
 
   return (
-    <div className={`app${activeMedia === null ? ' app--no-player' : ''}`}>
+    <div className={`app${activeMedia === null ? ' app--no-player' : ''}${sidebarCollapsed ? ' app--sidebar-collapsed' : ''}`}>
       {/* Sidebar */}
-      <aside className="sidebar">
+      <aside className={`sidebar${sidebarCollapsed ? ' sidebar--collapsed' : ''}`}>
         <div className="logo">
           <div className="logo-icon">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3" /></svg>
@@ -1058,6 +1525,9 @@ export default function App() {
             <span className="logo-go">Go</span><span className="logo-anime">Anime</span>
           </div>
           <span className="logo-badge">Desktop</span>
+          <button className="sidebar-toggle-btn" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'} type="button">
+            {sidebarCollapsed ? '\u25B6' : '\u25C0'}
+          </button>
         </div>
 
         <div className="sidebar-section">
@@ -1104,6 +1574,33 @@ export default function App() {
               <span>Continuar assistindo</span>
               {progress.length > 0 && <span className="sidebar-count">{progress.length}</span>}
             </button>
+            <button
+              className={`sidebar-nav-btn${view === 'history' ? ' active' : ''}`}
+              onClick={() => { setView('history'); setQuery('') }}
+            >
+              <IconClock />
+              <span>Hist{'\u00F3'}rico</span>
+              {history.length > 0 && <span className="sidebar-count">{history.length}</span>}
+            </button>
+            <button className={`sidebar-nav-btn${view === 'bots' ? ' active' : ''}`} onClick={() => { setView('bots'); setQuery('') }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+              <span>Bots IA</span>
+              {botStatus.newReleases > 0 && <span className="sidebar-count bot-badge">{botStatus.newReleases}</span>}
+            </button>
+            <button className={`sidebar-nav-btn${view === 'stats' ? ' active' : ''}`} onClick={() => { setView('stats'); setQuery('') }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+              <span>Estat{'\u00ed'}sticas</span>
+            </button>
+            <button className={`sidebar-nav-btn${view === 'lists' ? ' active' : ''}`} onClick={() => { setView('lists'); setQuery('') }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+              <span>Listas</span>
+              {Object.values(customLists).reduce((a, b) => a + b.length, 0) > 0 && <span className="sidebar-count">{Object.values(customLists).reduce((a, b) => a + b.length, 0)}</span>}
+            </button>
+            <button className={`sidebar-nav-btn${view === 'queue' ? ' active' : ''}`} onClick={() => { setView('queue'); setQuery('') }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+              <span>Fila</span>
+              {playQueue.length > 0 && <span className="sidebar-count">{playQueue.length}</span>}
+            </button>
           </div>
 
           {genres.length > 0 && (
@@ -1129,6 +1626,11 @@ export default function App() {
             </>
           )}
 
+          <button className={`sidebar-nav-btn${view === 'calendar' ? ' active' : ''}`} onClick={() => { setView('calendar'); setQuery('') }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <span>Calend{'\u00e1'}rio</span>
+          </button>
+
           {history.length > 0 && (
             <>
               <p className="sidebar-label">Recentes</p>
@@ -1143,6 +1645,16 @@ export default function App() {
             </>
           )}
         </div>
+        <div className="sidebar-footer">
+          <button className={`sidebar-nav-btn${view === 'settings' ? ' active' : ''}`} onClick={() => { setView('settings'); setQuery('') }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span>Configura{'\u00e7\u00f5'}es</span>
+          </button>
+          <div className={`ai-status ${botStatus.aiOnline ? 'ai-online' : 'ai-offline'}`}>
+            <span className="ai-status-dot" />
+            <span className="ai-status-text">{botStatus.aiOnline ? `IA: ${botStatus.aiModel || 'Online'}` : 'IA Offline'}</span>
+          </div>
+        </div>
       </aside>
 
       {/* Topbar */}
@@ -1153,14 +1665,37 @@ export default function App() {
             <IconSearch />
             <input
               value={query}
-              onChange={event => setQuery(event.target.value)}
+              onChange={event => { setQuery(event.target.value); setShowSuggestions(true) }}
+              onFocus={() => setShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
               placeholder={searchPlaceholder}
               autoFocus
             />
+            {searchState === 'loading' && (
+              <span className="search-spinner" />
+            )}
             {query && (
               <button className="search-clear" type="button" onClick={() => setQuery('')} title="Limpar busca" aria-label="Limpar busca">
                 <IconClear />
               </button>
+            )}
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="search-autocomplete">
+                {suggestions.map((s, i) => (
+                  <button
+                    key={i}
+                    className={`autocomplete-item autocomplete-item--${s.type}`}
+                    onMouseDown={e => {
+                      e.preventDefault()
+                      setQuery(s.text)
+                      setShowSuggestions(false)
+                    }}
+                  >
+                    {s.type === 'history' ? <IconClock /> : <IconSearch />}
+                    <span>{s.text}</span>
+                  </button>
+                ))}
+              </div>
             )}
           </div>
           <div className="window-controls">
@@ -1211,11 +1746,13 @@ export default function App() {
             )}
           </div>
 
-          <div className="source-select">
-            <select value={source} onChange={event => setSource(event.target.value as SourceFilter)}>
-              {sourceOptions.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
-          </div>
+          {view === 'movies' && (
+            <div className="source-select">
+              <select value={source} onChange={event => setSource(event.target.value as SourceFilter)}>
+                {sourceOptions.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
+              </select>
+            </div>
+          )}
         </div>}
       </header>
 
@@ -1229,14 +1766,8 @@ export default function App() {
         )}
 
         {searchState === 'loading' && (
-          <div className="results-grid">
-            {Array.from({ length: 8 }).map((_, index) => (
-              <div key={index} className="skeleton-card">
-                <div className="skeleton-cover" />
-                <div className="skeleton-line" />
-                <div className="skeleton-line short" />
-              </div>
-            ))}
+          <div className="search-list">
+            <div className="search-list-loading">Buscando...</div>
           </div>
         )}
 
@@ -1360,6 +1891,289 @@ export default function App() {
           </div>
         )}
 
+        {view === 'history' && searchState === 'idle' && trimmedQuery.length < 2 && (
+          <div className="history-view">
+            <div className="page-header">
+              <h2>Hist{'\u00F3'}rico</h2>
+            </div>
+            {history.length === 0 && progress.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-icon">{'\u23F2'}</div>
+                <h3>Nenhuma busca recente</h3>
+                <p>Suas buscas e {'epis\u00F3dios'} assistidos aparecer{'\u00E3o'} aqui.</p>
+              </div>
+            ) : (
+              <>
+                {history.length > 0 && (
+                  <>
+                    <h3 className="section-heading">Hist{'\u00F3'}rico de Busca</h3>
+                    <div className="history-grid">
+                      {history.map(entry => (
+                        <button key={entry.name} className="history-card" onClick={() => { setQuery(entry.name); setView('catalog') }}>
+                          <IconClock />
+                          <span className="history-card-text">{entry.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {progress.length > 0 && (
+                  <>
+                    <h3 className="section-heading" style={{ marginTop: 24 }}>{'\u00DA'}ltimos Assistidos</h3>
+                    <div className="watching-grid">
+                      {progress.slice(0, 12).map(item => (
+                        <button
+                          key={item.allanimeId}
+                          className="watching-card"
+                          onClick={() => { setQuery(item.title); setView('catalog') }}
+                        >
+                          <div className="watching-card-header">
+                            <span className="watching-card-title">{item.title}</span>
+                            <span className="watching-ep-badge">Ep {item.episodeNumber}</span>
+                          </div>
+                          <div className="watching-card-meta">
+                            <span>{formatPercent(item.progressPercent)} assistido</span>
+                          </div>
+                          {item.progressPercent > 0 && (
+                            <div className="ep-progress-wrap watching-progress">
+                              <div className="ep-progress-bar" style={{ width: `${Math.min(100, item.progressPercent)}%` }} />
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {view === 'bots' && searchState === 'idle' && trimmedQuery.length < 2 && (
+          <div className="bots-view">
+            <div className="page-header" style={{ justifyContent: 'space-between', marginBottom: 16 }}>
+              <h2>Bots IA</h2>
+              <div className="bots-status-bar">
+                <span className={`ai-indicator ${botStatus.aiOnline ? 'online' : 'offline'}`}>
+                  {botStatus.aiOnline ? `\u2713 IA Online (${botStatus.aiModel || 'local'})` : '\u2717 IA Offline \u2014 Inicie o LM Studio'}
+                </span>
+              </div>
+            </div>
+
+            {/* Bot 1: Releases PT-BR */}
+            <section className="bot-section">
+              <h3 className="section-heading">{'\uD83D\uDD14'} Lan{'\u00E7'}amentos PT-BR (Nyaa)</h3>
+              {nyaaReleases.length === 0 ? (
+                <p className="empty-state-text">Nenhum lan{'\u00E7'}amento encontrado ainda. Verificando a cada 30 min...</p>
+              ) : (
+                <div className="releases-list">
+                  {nyaaReleases.slice(0, 20).map((r, i) => (
+                    <button key={i} className={`release-card ${r.isNew ? 'release-new' : ''}`} onClick={() => BrowserOpenURL(r.link)}>
+                      <div className="release-info">
+                        <span className="release-title">{r.title}</span>
+                        <div className="release-meta">
+                          <span>{r.size}</span>
+                          <span>{'\u2191'} {r.seeders}</span>
+                          <span>{r.date ? new Date(r.date).toLocaleDateString('pt-BR') : ''}</span>
+                        </div>
+                      </div>
+                      {r.isNew && <span className="release-badge">NOVO</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {/* Bot 2: Recommendations */}
+            <section className="bot-section">
+              <div className="section-header-row">
+                <h3 className="section-heading">{'\u2728'} Recomendados para Voc{'\u00EA'}</h3>
+                {botStatus.aiOnline && (
+                  <button className="btn-refresh" onClick={async () => {
+                    setBotsLoading(true)
+                    const recs = await refreshRecommendations()
+                    setAiRecs(recs || [])
+                    setBotsLoading(false)
+                  }}>
+                    {botsLoading ? 'Gerando...' : 'Atualizar'}
+                  </button>
+                )}
+              </div>
+              {!botStatus.aiOnline ? (
+                <p className="empty-state-text">Inicie o LM Studio para receber recomenda{'\u00E7\u00F5'}es personalizadas.</p>
+              ) : aiRecs.length === 0 ? (
+                <p className="empty-state-text">{botsLoading ? 'Gerando recomenda\u00E7\u00F5es...' : 'Assista mais animes para receber recomenda\u00E7\u00F5es.'}</p>
+              ) : (
+                <div className="recs-grid">
+                  {aiRecs.map((rec, i) => (
+                    <div key={i} className="rec-card" onClick={() => { setQuery(rec.title); setView('catalog') }}>
+                      <div className="rec-rank">#{i + 1}</div>
+                      <div className="rec-info">
+                        <span className="rec-title">{rec.title}</span>
+                        <span className="rec-reason">{rec.reason}</span>
+                        {rec.genres && <span className="rec-genres">{rec.genres}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {/* Bot 3: Curated */}
+            <section className="bot-section">
+              <div className="section-header-row">
+                <h3 className="section-heading">{'\uD83C\uDFAF'} Curadoria PT-BR</h3>
+                {botStatus.aiOnline && (
+                  <button className="btn-refresh" onClick={async () => {
+                    setBotsLoading(true)
+                    const c = await refreshCuratedReleases()
+                    setCuratedReleases(c || [])
+                    setBotsLoading(false)
+                  }}>
+                    {botsLoading ? 'Avaliando...' : 'Atualizar'}
+                  </button>
+                )}
+              </div>
+              {!botStatus.aiOnline ? (
+                <p className="empty-state-text">Inicie o LM Studio para curadoria inteligente.</p>
+              ) : curatedReleases.length === 0 ? (
+                <p className="empty-state-text">{botsLoading ? 'Avaliando lan\u00E7amentos...' : 'Nenhum lan\u00E7amento avaliado.'}</p>
+              ) : (
+                <div className="releases-list">
+                  {curatedReleases.map((c, i) => (
+                    <button key={i} className={`release-card curated-${c.quality.toLowerCase()}`} onClick={() => BrowserOpenURL(c.release.link)}>
+                      <div className="release-info">
+                        <span className="release-title">{c.release.title}</span>
+                        <div className="release-meta">
+                          <span className={`quality-badge quality-${c.quality.toLowerCase()}`}>{c.quality}</span>
+                          <span>{c.summary}</span>
+                          <span>{c.release.size}</span>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+
+        {view === 'settings' && (
+          <>
+            {settings && (
+              <Settings settings={settings} onSave={async (s) => { await saveSettings(s); setSettings(s); showToast('Configura\u00e7\u00f5es salvas!', 'success') }} />
+            )}
+            <div className="sync-section" style={{ maxWidth: '600px', margin: '0 auto', padding: '0 24px 24px' }}>
+              <h3 style={{ color: 'var(--text)', marginBottom: '12px' }}>Sincroniza\u00e7\u00e3o AniList</h3>
+              {anilistStatus?.connected ? (
+                <div>
+                  {anilistStatus.profile && (
+                    <div className="sync-profile">
+                      {anilistStatus.profile.avatar && <img src={anilistStatus.profile.avatar} alt="" style={{ width: 40, height: 40, borderRadius: '50%' }} />}
+                      <span style={{ color: 'var(--text)' }}>{anilistStatus.profile.name}</span>
+                    </div>
+                  )}
+                  <p className="sync-status" style={{ color: '#4ade80' }}>Conectado</p>
+                  {anilistStatus.lastSync && <p style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{'\u00DA'}ltimo sync: {anilistStatus.lastSync}</p>}
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                    <button className="sync-btn" onClick={async () => { await syncToAniList(); showToast('Sincronizado!', 'success'); const s = await getAniListSyncStatus(); setAnilistStatus(s) }}>Sincronizar agora</button>
+                    <button className="sync-btn" style={{ background: '#dc2626' }} onClick={async () => { await disconnectAniList(); setAnilistStatus({ connected: false, tokenStored: false }) }}>Desconectar</button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <p className="sync-status" style={{ color: 'var(--text-muted)' }}>N\u00e3o conectado</p>
+                  <button className="sync-btn" onClick={handleAniListAuth} style={{ marginTop: '8px' }}>Conectar AniList</button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {view === 'calendar' && (
+          <div className="calendar-view">
+            <h2>Calend{'\u00e1'}rio da Temporada</h2>
+            {seasonCalendar.map(day => (
+              <div key={day.day} className="calendar-day">
+                <h3>{day.day}</h3>
+                <div className="calendar-grid">
+                  {day.entries.map((entry, i) => (
+                    <div key={i} className="calendar-card" onClick={() => { setQuery(entry.title) }}>
+                      <img src={entry.imageUrl} alt={entry.title} />
+                      <div className="calendar-card-info">
+                        <p className="calendar-card-title">{entry.title}</p>
+                        <p className="calendar-card-ep">Ep {entry.episode}{entry.totalEpisodes ? ` / ${entry.totalEpisodes}` : ''}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {view === 'stats' && watchStats && (
+          <Stats stats={watchStats} />
+        )}
+
+        {view === 'lists' && (
+          <div className="custom-lists-view" style={{ padding: '24px' }}>
+            <h2 style={{ color: 'var(--text)', marginBottom: '16px' }}>Minhas Listas</h2>
+            <div className="list-selector">
+              {listNames.map(name => (
+                <button key={name} className={`list-tab${selectedList === name ? ' active' : ''}`} onClick={() => setSelectedList(name)}>
+                  {name} ({(customLists[name] || []).length})
+                </button>
+              ))}
+            </div>
+            <div className="catalog-grid" style={{ marginTop: '16px' }}>
+              {(customLists[selectedList] || []).map((entry, i) => (
+                <div key={i} className="catalog-card" onClick={() => { setQuery(entry.name) }}>
+                  {entry.imageUrl && <img className="catalog-card-img" src={entry.imageUrl} alt={entry.name} loading="lazy" />}
+                  <div className="catalog-card-body">
+                    <p className="catalog-card-title">{entry.name}</p>
+                    <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
+                      <button className="btn-small" onClick={(e) => { e.stopPropagation(); handleRemoveFromList(selectedList, entry.name) }} title="Remover">Remover</button>
+                      <select className="settings-select" style={{ fontSize: '11px', padding: '2px 4px' }} value="" onChange={(e) => { if (e.target.value) handleMoveToList(selectedList, e.target.value, entry.name) }} onClick={e => e.stopPropagation()}>
+                        <option value="">Mover para...</option>
+                        {listNames.filter(n => n !== selectedList).map(n => <option key={n} value={n}>{n}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {(customLists[selectedList] || []).length === 0 && (
+                <p style={{ color: 'var(--text-muted)', gridColumn: '1/-1', textAlign: 'center', padding: '40px' }}>Lista vazia</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {view === 'queue' && (
+          <div className="queue-panel" style={{ padding: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h2 style={{ color: 'var(--text)' }}>Fila de Reprodu\u00e7\u00e3o</h2>
+              {playQueue.length > 0 && (
+                <button className="btn-small" onClick={async () => { await clearQueue(); setPlayQueue([]) }}>Limpar fila</button>
+              )}
+            </div>
+            {playQueue.length === 0 ? (
+              <p className="queue-empty">Nenhum epis\u00f3dio na fila. Adicione epis\u00f3dios usando o bot\u00e3o na \u00e1rea do player.</p>
+            ) : (
+              playQueue.map((item, i) => (
+                <div key={i} className="queue-item">
+                  {item.imageUrl && <img src={item.imageUrl} alt={item.mediaName} style={{ width: '60px', height: '36px', objectFit: 'cover', borderRadius: '4px' }} />}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ color: 'var(--text)', fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.mediaName}</p>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '11px' }}>Ep {item.episodeNumber}</p>
+                  </div>
+                  <button className="btn-small" onClick={async () => { await removeFromQueue(i); const q = await getPlayQueue(); setPlayQueue(q) }}>X</button>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
         {view === 'movies' && trimmedQuery.length < 2 && searchState === 'idle' && (
           <div className="movies-page">
             <div className="movie-hero-card">
@@ -1463,80 +2277,102 @@ export default function App() {
           </div>
         )}
 
-        {searchState !== 'loading' && visibleResults.length > 0 && (
-          <div className="results-grid">
-            {visibleResults.map((item, index) => {
-              const favorite = isFavorite(item)
+        {animeDetailLoading && !animeDetail && (
+          <div className="anime-detail" style={{ padding: '40px 24px', textAlign: 'center' }}>
+            <div className="status-bar" style={{ display: 'inline-flex' }}>
+              <span className="status-dot loading" />
+              <span>Carregando detalhes...</span>
+            </div>
+          </div>
+        )}
 
+        {animeDetail && (
+          <div className="anime-detail">
+            {animeDetail.bannerImage ? (
+              <img className="anime-detail-banner" src={animeDetail.bannerImage} alt="" />
+            ) : (
+              <div className="anime-detail-banner" />
+            )}
+            <div className="anime-detail-header">
+              {animeDetail.coverImage ? (
+                <img className="anime-detail-cover" src={animeDetail.coverImage} alt={animeDetail.title} />
+              ) : (
+                <div className="anime-detail-cover" style={{ background: 'var(--surface-2)', display: 'grid', placeItems: 'center' }}>
+                  <IconFilm />
+                </div>
+              )}
+              <div className="anime-detail-info">
+                <h2 className="anime-detail-title">{animeDetail.title}</h2>
+                {animeDetail.titleRomaji && animeDetail.titleRomaji !== animeDetail.title && (
+                  <p style={{ fontSize: '13px', color: 'var(--text-soft)', marginBottom: '8px' }}>{animeDetail.titleRomaji}</p>
+                )}
+                <div className="anime-detail-meta">
+                  {animeDetail.score > 0 && <span className="anime-detail-score">{'\u2605'} {animeDetail.score.toFixed(1)}</span>}
+                  {animeDetail.year > 0 && <span>{animeDetail.year}</span>}
+                  {animeDetail.format && <span>{animeDetail.format}</span>}
+                  {animeDetail.status && <span>{animeDetail.status === 'RELEASING' ? 'Em exibi\u00e7\u00e3o' : animeDetail.status === 'FINISHED' ? 'Finalizado' : animeDetail.status === 'NOT_YET_RELEASED' ? 'A lan\u00e7ar' : animeDetail.status}</span>}
+                </div>
+                {animeDetail.genres?.length > 0 && (
+                  <div className="anime-detail-genres">
+                    {animeDetail.genres.map(g => (
+                      <span key={g} className="anime-detail-genre">{genreLabels[g] ?? g}</span>
+                    ))}
+                  </div>
+                )}
+                {animeDetail.totalEpisodes > 0 && (
+                  <p style={{ fontSize: '13px', color: 'var(--text-soft)' }}>
+                    {animeDetail.totalEpisodes} {animeDetail.totalEpisodes === 1 ? 'epis\u00f3dio' : 'epis\u00f3dios'}
+                    {animeDetail.status === 'RELEASING' ? ' \u00b7 Em exibi\u00e7\u00e3o' : ''}
+                  </p>
+                )}
+              </div>
+            </div>
+            {animeDetail.description && (
+              <p className="anime-detail-synopsis">
+                {animeDetail.description.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '')}
+              </p>
+            )}
+            <div className="anime-detail-actions">
+              <button className="anime-detail-btn anime-detail-btn-primary" onClick={handleDetailWatch} disabled={animeDetailLoading}>
+                <IconPlay /> Assistir
+              </button>
+              <button className="anime-detail-btn anime-detail-btn-secondary" onClick={handleDetailClose}>
+                Voltar
+              </button>
+            </div>
+            {animeDetail.sources && animeDetail.sources.length > 0 && (
+              <div className="anime-detail-sources">
+                <strong>Fontes dispon{'\u00ed'}veis:</strong>{' '}
+                {animeDetail.sources.map(s => s.source).join(' \u00b7 ')}
+              </div>
+            )}
+            {!animeDetail.sources?.length && animeDetailMediaRef.current?.availableSources?.length ? (
+              <div className="anime-detail-sources">
+                <strong>Fontes dispon{'\u00ed'}veis:</strong>{' '}
+                {animeDetailMediaRef.current.availableSources.join(' \u00b7 ')}
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        {searchState !== 'loading' && visibleResults.length > 0 && !animeDetail && (
+          <div className="search-list">
+            {visibleResults.map((item) => {
+              const langTag = extractLangTag(item.name)
+              const title = cleanTitle(item.name)
               return (
-                <article
-                  key={`${item.source}:${item.url}:${item.name}`}
-                  className={`media-card${activeMedia?.url === item.url ? ' active' : ''}`}
-                  style={{ '--card-i': index } as React.CSSProperties}
+                <div
+                  key={`${item.source}:${item.url}`}
+                  className={`search-list-item${activeMedia?.url === item.url ? ' active' : ''}`}
                   onClick={() => void handleOpenMedia(item)}
-                  title={cleanTitle(item.name)}
+                  title={`${title} — ${item.source}`}
                 >
-                  <div className="cover">
-                    <button
-                      className={`btn-fav${favorite ? ' active' : ''}`}
-                      type="button"
-                      onClick={event => {
-                        event.stopPropagation()
-                        void handleToggleFavorite(item)
-                      }}
-                      title={favorite ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}
-                      aria-label={favorite ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}
-                    >
-                      <IconHeart active={favorite} />
-                    </button>
-                    {item.imageUrl
-                      ? <img src={item.imageUrl} alt={item.name} loading="lazy" />
-                      : <div className="cover-fallback"><IconFilm /></div>}
-                    <div className="cover-overlay">
-                      <span className="chip chip-type">{typeLabels[item.mediaType as TypeFilter] ?? item.mediaType}</span>
-                      <span className="chip chip-source">{item.source}</span>
-                      {item.watchHasPortuguese && <span className="chip chip-lang chip-lang-pt">PT-BR</span>}
-                      {item.watchHasDub && <span className="chip chip-lang chip-lang-pt">DUB</span>}
-                      {item.watchHasSub && <span className="chip chip-lang chip-lang-en">LEG</span>}
-                      {!item.watchHasPortuguese && !item.watchHasDub && !item.watchHasSub && (() => { const t = extractLangTag(item.name); return t ? <span className={`chip chip-lang chip-lang-${t.variant}`}>{t.label}</span> : null })()}
-                    </div>
-                    {(item.score || item.description || item.genres?.length) ? (
-                      <div className="card-meta-overlay">
-                        {item.score ? <span className="cmo-score">★ {item.score.toFixed(1)}</span> : null}
-                        {item.genres?.length ? (
-                          <div className="cmo-genres">
-                            {item.genres.slice(0, 3).map(g => (
-                              <span key={g} className="catalog-genre-pill">{g}</span>
-                            ))}
-                          </div>
-                        ) : null}
-                        {item.description ? (
-                          <p className="cmo-desc">
-                            {item.description.length > 110 ? item.description.slice(0, 110) + '…' : item.description}
-                          </p>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="card-info">
-                    <p className="card-title">{formatCardTitle(item)}</p>
-                    <p className={`card-language${watchHasPortugueseSignal(item) ? ' card-language-pt' : ' card-language-en'}`}>
-                      {formatLanguageSummary(item)}
-                    </p>
-                    {item.year && <p className="card-year">{item.year}</p>}
-                    {(item.watchSource || item.downloadSource || item.dubSource || item.subSource || item.availableSources?.length) && (
-                      <div className="card-recommendations">
-                        {item.availableSources && item.availableSources.length > 1 && (
-                          <span className="card-reco-chip">Fontes {item.availableSources.length}</span>
-                        )}
-                        {item.watchSource && <span className="card-reco-chip">Ver {formatSourceLabel(item.watchSource)}</span>}
-                        {item.downloadSource && <span className="card-reco-chip">DL {formatSourceLabel(item.downloadSource)}</span>}
-                        {item.dubSource && <span className="card-reco-chip">Dub {formatSourceLabel(item.dubSource)}</span>}
-                        {item.subSource && <span className="card-reco-chip">Sub {formatSourceLabel(item.subSource)}</span>}
-                      </div>
-                    )}
-                  </div>
-                </article>
+                  <span className={`search-list-tag tag-${langTag?.variant ?? 'source'}`}>
+                    [{langTag?.label ?? item.source}]
+                  </span>
+                  <span className="search-list-title">{title}</span>
+                  {item.score ? <span className="search-list-score">{item.score.toFixed(1)}</span> : null}
+                </div>
               )
             })}
           </div>
@@ -1545,22 +2381,35 @@ export default function App() {
 
       {/* Player */}
       <aside className="player-panel">
+        <button className="panel-close-btn" onClick={handleClosePlayer} title="Fechar player" type="button">&times;</button>
         <div
           ref={playerWrapRef}
           className="player-video-wrap"
           onDoubleClick={() => void handleToggleFullscreen()}
         >
-          <video
-            ref={videoRef}
-            className="player-video"
-            controls
-            playsInline
-            preload="metadata"
-            poster={activeMedia?.imageUrl ?? ''}
-            onTimeUpdate={handleVideoTimeUpdate}
-            onPause={() => { void persistCurrentProgress(false) }}
-            onEnded={() => { void handleVideoEnded() }}
-          />
+          {iframeUrl ? (
+            <iframe
+              src={iframeUrl}
+              className="player-video"
+              style={{ border: 'none', width: '100%', height: '100%' }}
+              allowFullScreen
+              allow="autoplay; encrypted-media"
+            />
+          ) : (
+            <video
+              ref={videoRef}
+              className="player-video"
+              controls
+              playsInline
+              preload="metadata"
+              poster={activeMedia?.imageUrl ?? ''}
+              onTimeUpdate={handleVideoTimeUpdate}
+              onPause={() => { void persistCurrentProgress(false) }}
+              onEnded={() => { void handleVideoEnded() }}
+            />
+          )}
+          {showSkipIntro && <button className="skip-btn skip-intro" onClick={() => { if (videoRef.current && skipTimes) videoRef.current.currentTime = skipTimes.opEnd }}>Pular Intro</button>}
+          {showSkipEnding && <button className="skip-btn skip-ending" onClick={() => { if (videoRef.current && skipTimes) videoRef.current.currentTime = skipTimes.edEnd }}>Pular Encerramento</button>}
         </div>
 
         <div className="player-body">
@@ -1592,6 +2441,21 @@ export default function App() {
                 >
                   <IconHeart active={isActiveFavorite} />
                 </button>
+                <div style={{ position: 'relative', display: 'inline-block' }}>
+                  <button className="btn-small" onClick={() => setListDropdownFor(listDropdownFor ? null : (activeMedia ? cleanTitle(activeMedia.name) : null))} title="Adicionar a lista">
+                    +Lista
+                  </button>
+                  {listDropdownFor && (
+                    <div className="list-move-dropdown" style={{ position: 'absolute', top: '100%', left: 0, zIndex: 100 }}>
+                      {listNames.map(name => (
+                        <button key={name} className="list-move-option" onClick={() => handleAddToList(name)}>{name}</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <button className="btn-small" onClick={() => setShowNotes(true)} disabled={!activeMedia} title="Notas" style={{ marginLeft: '4px' }}>
+                  Notas{activeNote && activeNote.rating > 0 ? ` (${activeNote.rating}/10)` : ''}
+                </button>
                 <button className="btn-icon" type="button" onClick={() => void handleToggleFullscreen()} title="Tela cheia">
                   <IconExpand active={isFullscreen} />
                 </button>
@@ -1618,28 +2482,52 @@ export default function App() {
               </span>
               <div className="episode-list-wrap">
                 {episodes.length === 0 ? (
-                  <p className="episode-list-empty">—</p>
+                  <p className="episode-list-empty">{'\u2014'}</p>
                 ) : (
-                  <div className="episode-list" ref={episodeListRef}>
-                    {episodes.map((episode, index) => {
-                      const epNum = getEpisodeNumber(episode, index)
-                      const watched = activeProgress ? epNum < activeProgress.episodeNumber : false
-                      const lastWatched = activeProgress ? epNum === activeProgress.episodeNumber : false
-                      const isCurrent = index === episodeIndex
-                      return (
-                        <button
-                          key={`${episode.url}-${index}`}
-                          className={`ep-item${isCurrent ? ' current' : ''}${watched ? ' watched' : ''}${lastWatched ? ' last-watched' : ''}`}
-                          onClick={() => setEpisodeIndex(index)}
-                          title={episode.title || `Epis\u00f3dio ${epNum}`}
-                        >
-                          <span className="ep-item-num">Ep {epNum}</span>
-                          {episode.title && <span className="ep-item-title">{episode.title}</span>}
-                          {(watched || lastWatched) && <span className="ep-check">{'\u2713'}</span>}
-                        </button>
-                      )
-                    })}
-                  </div>
+                  <>
+                    <input
+                      className="episode-filter-input"
+                      type="text"
+                      placeholder="Filtrar episódios..."
+                      value={episodeFilter}
+                      onChange={e => setEpisodeFilter(e.target.value)}
+                    />
+                    <div className="episode-list" ref={episodeListRef}>
+                      {filteredEpisodes.map(({ ep: episode, originalIndex }) => {
+                        const epNum = getEpisodeNumber(episode, originalIndex)
+                        const watched = activeProgress ? epNum < activeProgress.episodeNumber : false
+                        const lastWatched = activeProgress ? epNum === activeProgress.episodeNumber : false
+                        const isCurrent = originalIndex === episodeIndex
+                        return (
+                          <button
+                            key={`${episode.url}-${originalIndex}`}
+                            className={`ep-item${isCurrent ? ' current' : ''}${watched ? ' watched' : ''}${lastWatched ? ' last-watched' : ''}`}
+                            onClick={() => setEpisodeIndex(originalIndex)}
+                            title={episode.title || `Episódio ${epNum}`}
+                          >
+                            <input
+                              type="checkbox"
+                              className="watched-check"
+                              checked={watchedMarks.has(epNum)}
+                              onChange={async (e) => {
+                                e.stopPropagation()
+                                const checked = e.target.checked
+                                const key = activeMedia ? (activeMedia.groupKey || normalizeSearchText(cleanTitle(activeMedia.name))) : ''
+                                if (key) {
+                                  await setEpisodeWatched(key, epNum, checked)
+                                  setWatchedMarks(prev => { const next = new Set(prev); checked ? next.add(epNum) : next.delete(epNum); return next })
+                                }
+                              }}
+                              onClick={e => e.stopPropagation()}
+                            />
+                            <span className="ep-item-num">Ep {epNum}</span>
+                            {episode.title && <span className="ep-item-title">{episode.title}</span>}
+                            {(watched || lastWatched) && <span className="ep-check">{'\u2713'}</span>}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </>
                 )}
               </div>
             </div>
@@ -1675,6 +2563,18 @@ export default function App() {
                   {qualityOptions.map(option => <option key={option} value={option}>{option}</option>)}
                 </select>
               </div>
+
+              <div className="control-group">
+                <span className="control-label">Velocidade</span>
+                <select className="speed-select control-select" value={playbackSpeed} onChange={e => { const s = parseFloat(e.target.value); setPlaybackSpeed(s); if (videoRef.current) videoRef.current.playbackRate = s }}>
+                  <option value={0.5}>0.5x</option>
+                  <option value={0.75}>0.75x</option>
+                  <option value={1}>1x</option>
+                  <option value={1.25}>1.25x</option>
+                  <option value={1.5}>1.5x</option>
+                  <option value={2}>2x</option>
+                </select>
+              </div>
             </div>
 
             <div className="play-actions">
@@ -1698,12 +2598,20 @@ export default function App() {
               <button className={`btn btn-secondary${isDownloading ? ' btn-loading' : ''}`} onClick={() => void handleDownload()} disabled={!canDownload}>
                 {!isDownloading && <><IconDownload /> Baixar episodio</>}
               </button>
+              <button className="btn btn-secondary" onClick={handleAddToQueue} disabled={!activeMedia || !currentEpisode}>
+                + Fila
+              </button>
               <button className="btn btn-secondary" onClick={() => void handleToggleFullscreen()}>
                 <IconExpand active={isFullscreen} /> Tela cheia
               </button>
+              {!iframeUrl && (
+                <button className={`btn btn-secondary${isPip ? ' active' : ''}`} onClick={() => void handleTogglePip()} title="Picture-in-Picture (I)">
+                  PiP
+                </button>
+              )}
             </div>
 
-            <p className="keys-hint">&lt;- P | prox N -&gt; | F para tela cheia</p>
+            <p className="keys-hint">Espa{'\u00E7'}o: pausar | Shift+{'\u2190'}{'\u2192'}: avan{'\u00E7'}ar 10s | N/P: epis{'\u00F3'}dios | F: tela cheia | M: mudo | I: PiP | []: velocidade</p>
           </div>
 
           {/* Anime relacionados */}
@@ -1743,6 +2651,16 @@ export default function App() {
           )}
         </div>
       </aside>
+
+      {/* Notes modal */}
+      {showNotes && activeMedia && (
+        <AnimeNotes
+          title={cleanTitle(activeMedia.name)}
+          note={activeNote}
+          onSave={handleSaveNote}
+          onClose={() => setShowNotes(false)}
+        />
+      )}
 
       {/* Toast stack */}
       {toasts.length > 0 && (
